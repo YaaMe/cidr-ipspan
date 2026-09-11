@@ -13,7 +13,14 @@ go test -v ./...                    # agreement and footprint
 go test -run '^$' -bench . ./...    # the comparison
 ```
 
-All five structures are built from the same corpus and checked to agree on 4000
+`bart` appears twice in the membership table. `bart.Lite` stores no payload,
+which is what `ipspan.Set` does, so it is the fair opponent; `bart.Table` was
+the original opponent and carried the ability to return a prefix while being
+asked only for a boolean. They measure the same within noise — `Contains` never
+reads the payload — so the distinction turned out not to matter, but it is kept
+because that was worth establishing rather than assuming.
+
+All structures are built from the same corpus and checked to agree on 4000
 probes per provider before anything is timed — membership against an exhaustive
 scan, and `ipspan.Table` against `bart` on *which* prefix, not merely whether
 one exists. Probes rotate through 8192 addresses rather than repeating one.
@@ -28,30 +35,30 @@ ns/op, minimum of three runs, Go 1.26 on darwin/arm64 (Apple M2). Both families
 are probed: the two index paths behave differently enough that measuring only
 IPv4 hides half the picture.
 
-| corpus | fam | mix | **ipspan.Set** | bart | netipx | cidranger |
-|---|---|---|---|---|---|---|
-| aws | v4 | all hit | **23.6** | 31.2 | — | — |
-| aws | v4 | half hit | **15.4** | 17.6 | — | — |
-| aws | v4 | all miss | 3.6 | **2.7** | — | — |
-| github | v4 | all hit | 32.3 | **32.0** | — | — |
-| linode | v4 | all hit | **14.4** | 14.6 | — | — |
-| linode | v4 | half hit | **10.8** | 12.1 | — | — |
-| aws | **v6** | all hit | **54.3** | 60.1 | — | — |
-| aws | **v6** | half hit | **33.1** | 40.9 | — | — |
-| aws | **v6** | all miss | **4.2** | 8.9 | — | — |
-| github | **v6** | all hit | **53.0** | 76.8 | — | — |
-| github | **v6** | half hit | **32.9** | 40.7 | — | — |
-| linode | **v6** | all hit | **23.0** | 41.8 | — | — |
-| linode | **v6** | half hit | **18.3** | 23.7 | — | — |
+| corpus | fam | mix | **ipspan.Set** | bart.Lite | bart.Table |
+|---|---|---|---|---|---|
+| aws | v4 | all hit | **23.5** | 30.9 | 31.4 |
+| aws | v4 | half hit | **15.7** | 19.3 | 19.5 |
+| aws | v4 | all miss | 3.6 | **2.7** | 2.7 |
+| github | v4 | all hit | 32.7 | **31.7** | 32.5 |
+| linode | v4 | all hit | 14.5 | **13.8** | 14.6 |
+| linode | v4 | half hit | **10.7** | 11.8 | 12.1 |
+| aws | **v6** | all hit | **53.9** | 60.1 | 59.8 |
+| aws | **v6** | half hit | **33.5** | 41.3 | 40.3 |
+| aws | **v6** | all miss | **4.2** | 8.4 | 9.3 |
+| github | **v6** | all hit | **52.8** | 75.9 | 77.1 |
+| github | **v6** | half hit | **33.0** | 41.2 | 40.9 |
+| linode | **v6** | all hit | **23.0** | 40.5 | 41.8 |
+| linode | **v6** | half hit | **18.2** | 24.2 | 23.9 |
 
 netipx and cidranger are omitted from this table for width; they run 45–220 ns
 on the same probes, and the full set is in the benchmark output.
 
 **IPv4 is close.** `ipspan.Set` wins on `aws`, ties on `github` and `linode`,
-and loses the pure-miss case to bart at 3.6 against 2.7.
+and loses the pure-miss case at 3.6 against 2.7.
 
-**IPv6 is not close.** `ipspan.Set` is ahead everywhere except one miss case —
-23.0 against 41.8 on `linode`, 53.0 against 76.8 on `github`.
+**IPv6 is not close.** `ipspan.Set` is ahead everywhere except pure misses —
+23.0 against 40.5 on `linode`, 52.8 against 75.9 on `github`.
 
 The asymmetry has the same cause as the advantage this design was built for.
 A trie descends one node per stride, so its cost grows with how deep the match

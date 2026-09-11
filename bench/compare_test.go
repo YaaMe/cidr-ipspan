@@ -53,8 +53,20 @@ func buildTable(nets []*net.IPNet) *ipspan.Table {
 	return t
 }
 
-// bart stores the prefix as its value, so its Lookup answers the same question
-// ipspan.Table.Lookup does and the two are comparable.
+// For the membership comparison, bart.Lite is the right opponent: it stores no
+// payload, which is the same thing ipspan.Set does. Timing ipspan.Set against a
+// bart.Table[netip.Prefix] would have made bart carry the cost of an ability it
+// was not being asked to use.
+func buildBartLite(nets []*net.IPNet) *bart.Lite {
+	t := new(bart.Lite)
+	for _, p := range prefixesOf(nets) {
+		t.Insert(p)
+	}
+	return t
+}
+
+// For the longest-prefix-match comparison bart holds the prefix as its value,
+// so its Lookup answers the same question ipspan.Table.Lookup does.
 func buildBart(nets []*net.IPNet) *bart.Table[netip.Prefix] {
 	t := new(bart.Table[netip.Prefix])
 	for _, p := range prefixesOf(nets) {
@@ -134,6 +146,7 @@ func TestAgree(t *testing.T) {
 	for _, c := range corpora {
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		set, tbl := buildSet(all), buildTable(all)
+		lite := buildBartLite(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
 		pfxs := prefixesOf(all)
 
@@ -155,6 +168,9 @@ func TestAgree(t *testing.T) {
 			}
 			if got := bt.Contains(addrs[i]); got != want {
 				t.Fatalf("%s: bart(%s)=%v want %v", c.Name, addrs[i], got, want)
+			}
+			if got := lite.Contains(addrs[i]); got != want {
+				t.Fatalf("%s: bart.Lite(%s)=%v want %v", c.Name, addrs[i], got, want)
 			}
 			if got, _ := cg.Contains(ips[i]); got != want {
 				t.Fatalf("%s: cidranger(%s)=%v want %v", c.Name, ips[i], got, want)
@@ -209,7 +225,8 @@ func TestFootprint(t *testing.T) {
 		}
 		measure("ipspan.Set", func() any { return buildSet(all) })
 		measure("ipspan.Table", func() any { return buildTable(all) })
-		measure("bart", func() any { return buildBart(all) })
+		measure("bart.Lite", func() any { return buildBartLite(all) })
+		measure("bart.Table", func() any { return buildBart(all) })
 		measure("cidranger", func() any { return buildCidranger(all) })
 		measure("netipx", func() any { return buildNetipx(all) })
 	}
@@ -226,7 +243,9 @@ func BenchmarkMembership(b *testing.B) {
 		}
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		set, tbl := buildSet(all), buildTable(all)
+		lite := buildBartLite(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
+		_ = bt
 
 		// Both families: the two index paths behave differently enough that
 		// probing only IPv4 hides half the picture.
@@ -255,7 +274,12 @@ func BenchmarkMembership(b *testing.B) {
 						tbl.Contains(addrs[i&8191])
 					}
 				})
-				b.Run(pre+"bart", func(b *testing.B) {
+				b.Run(pre+"bartLite", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						lite.Contains(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"bartTable", func(b *testing.B) {
 					for i := 0; i < b.N; i++ {
 						bt.Contains(addrs[i&8191])
 					}

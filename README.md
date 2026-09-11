@@ -135,16 +135,21 @@ comparison against an exhaustive scan found it.
 Measured against eight providers' published ranges in [bench/](bench/), which
 has the full tables. ns/op, scattered probes, both address families:
 
-| corpus | fam | mix | **ipspan.Set** | bart |
+| corpus | fam | mix | **ipspan.Set** | bart.Lite |
 |---|---|---|---|---|
-| aws | v4 | all hit | **23.6** | 31.2 |
-| github | v4 | all hit | 32.3 | **32.0** |
-| linode | v4 | all hit | **14.4** | 14.6 |
+| aws | v4 | all hit | **23.5** | 30.9 |
+| github | v4 | all hit | 32.7 | **31.7** |
+| linode | v4 | all hit | 14.5 | **13.8** |
 | aws | v4 | all miss | 3.6 | **2.7** |
-| aws | **v6** | all hit | **54.3** | 60.1 |
-| github | **v6** | all hit | **53.0** | 76.8 |
-| linode | **v6** | all hit | **23.0** | 41.8 |
-| aws | **v6** | all miss | **4.2** | 8.9 |
+| aws | **v6** | all hit | **53.9** | 60.1 |
+| github | **v6** | all hit | **52.8** | 75.9 |
+| linode | **v6** | all hit | **23.0** | 40.5 |
+| aws | **v6** | all miss | **4.2** | 8.4 |
+
+`bart.Lite` is bart's membership-only variant, which stores no payload — the
+same thing `Set` does. Measured against the full `bart.Table` it makes no
+difference, since `Contains` never reads the payload, but comparing against it
+is the honest framing.
 
 IPv4 is close — `Set` wins on `aws`, ties elsewhere, loses pure misses. **IPv6
 is not close**, because a trie pays for depth and provider IPv6 prefixes are
