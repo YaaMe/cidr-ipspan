@@ -13,7 +13,7 @@ func mustBuild(t *testing.T, cidrs ...string) *Set {
 	for _, c := range cidrs {
 		b.AddPrefixString(c)
 	}
-	s, err := b.Build()
+	s, err := b.BuildSet()
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAgreesWithLinearScan(t *testing.T) {
 			for _, p := range prefixes {
 				b.AddPrefix(p)
 			}
-			s, err := b.Build()
+			s, err := b.BuildSet()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,7 +277,7 @@ func addrFromU128(v u128) netip.Addr {
 
 func TestEmptyAndInvalid(t *testing.T) {
 	var b Builder
-	s, err := b.Build()
+	s, err := b.BuildSet()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestBuildReportsError(t *testing.T) {
 	b.AddPrefixString("not-a-prefix")
 	b.AddPrefixString("192.168.0.0/16")
 
-	s, err := b.Build()
+	s, err := b.BuildSet()
 	if err == nil {
 		t.Fatal("expected an error for the malformed prefix")
 	}
@@ -335,7 +335,7 @@ func TestV4MappedFormsAgree(t *testing.T) {
 	// And a v4-mapped prefix must denote the same addresses as the plain one.
 	var b Builder
 	b.AddPrefix(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
-	m, err := b.Build()
+	m, err := b.BuildSet()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestV4MappedFormsAgree(t *testing.T) {
 func TestAddRange(t *testing.T) {
 	var b Builder
 	b.AddRange(netip.MustParseAddr("10.0.0.5"), netip.MustParseAddr("10.0.0.9"))
-	s, err := b.Build()
+	s, err := b.BuildSet()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestAddRange(t *testing.T) {
 	} {
 		var bb Builder
 		bb.AddRange(netip.MustParseAddr(bad[0]), netip.MustParseAddr(bad[1]))
-		if _, err := bb.Build(); err == nil {
+		if _, err := bb.BuildSet(); err == nil {
 			t.Errorf("AddRange(%s, %s) should have failed", bad[0], bad[1])
 		}
 	}

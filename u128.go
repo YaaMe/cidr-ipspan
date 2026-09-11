@@ -61,3 +61,14 @@ func hostMask128(bits int) u128 {
 		return u128{0, ^uint64(0) >> uint(bits-64)}
 	}
 }
+
+// prev returns a-1, reporting false if a is zero and subtracting would wrap.
+func (a u128) prev() (u128, bool) {
+	if a.lo != 0 {
+		return u128{a.hi, a.lo - 1}, true
+	}
+	if a.hi == 0 {
+		return a, false
+	}
+	return u128{a.hi - 1, ^uint64(0)}, true
+}

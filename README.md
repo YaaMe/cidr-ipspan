@@ -42,25 +42,60 @@ Linode list. It is still the slowest thing measured on a miss, because it
 binary-searches, and that is `log n` unpredictable branches. **Collapsing the
 set is worth a lot; searching it afterwards is where the saving goes.**
 
-## The trade
+## Two structures, you choose
 
-**It answers membership and nothing else.** There is no way to ask which prefix
-matched, or to attach a value to one.
+A `Set` forgets the prefixes. A `Table` remembers which one matched. Same
+`Builder`, different `Build`:
 
-That is not an omission, it is the mechanism. Merging assumes every covered
-address is equivalent; longest-prefix matching assumes covered addresses are
-ranked. `10.0.0.0/8` and `10.1.2.0/24` become one span, and `10.1.2.5` is in
-both — the span records neither, only that the address is covered.
+```go
+set, err := b.BuildSet()     // Contains(addr) bool
+tbl, err := b.BuildTable()   // Lookup(addr) (netip.Prefix, bool)
+```
 
-If you need the matching prefix back, keep a side table from span to
-contributing prefixes: membership stays fast and the rarer question costs a
-scan, but you are storing the prefixes again and the memory saving goes with
-them. If you need longest-prefix match with a payload — a routing table — use a
+`Table` does not scan the prefixes covering an address. Since the set is fixed
+once built, the answer is precomputed: prefix boundaries cut the address space
+into elementary intervals, and inside one of those the longest match never
+changes, so each interval stores its winner. Longest-prefix matching becomes
+the same indexed read membership is.
+
+ns/op, 8192 rotating addresses, darwin/arm64 (Apple M2), minimum of three runs:
+
+| blocks | mix | Set | Table.Contains | Table.Lookup |
+|---|---|---|---|---|
+| 1e3 | all hit | 5.9 | 7.2 | 7.4 |
+| 1e3 | half hit | 9.5 | 10.3 | 10.5 |
+| 1e3 | all miss | 4.2 | 4.5 | 4.5 |
+| 1e5 | all hit | 4.6 | 22.1 | 21.8 |
+| 1e5 | half hit | 10.0 | 15.5 | 15.8 |
+| 1e5 | all miss | 4.2 | 4.5 | 4.5 |
+
+**Returning the prefix is free.** `Lookup` costs what `Table.Contains` costs —
+21.8 against 22.1 — because the winner is one more array read, not a search.
+Once you are paying for a `Table`, there is no reason to ask the weaker
+question.
+
+What a `Table` costs is intervals. Merging for membership joins everything
+touching; a `Table` must also cut wherever the winner changes, so 100000
+nested blocks give a `Set` 523 spans and a `Table` 183066 intervals. That is
+where the 4.6 against 22.1 comes from, and the memory:
+
+| blocks | Set | Table |
+|---|---|---|
+| 1e3 | 27 B/block | 81 B/block |
+| 1e4 | 23 B/block | 83 B/block |
+| 1e5 | 9 B/block | 66 B/block |
+
+So: `Set` if membership is the question, `Table` if you need the answer. Misses
+cost the same either way, which matters because for most callers misses are the
+common case.
+
+Neither is a routing table. There is no way to attach a value to a prefix, and
+`Table` resolves one prefix rather than walking a hierarchy. For that, use a
 trie such as [gaissmai/bart](https://github.com/gaissmai/bart).
 
-**The set is immutable.** A `Builder` accumulates; `Build` merges and indexes;
-the `Set` is read-only and safe for concurrent use. Adding an address means
-building again.
+**Both are immutable.** A `Builder` accumulates; `BuildSet` or `BuildTable`
+merges and indexes; the result is read-only and safe for concurrent use. Adding
+an address means building again.
 
 ## When it fits
 
@@ -86,11 +121,19 @@ side, and far away — for corpora up to 20000 prefixes in both families, plus
 the prefix lengths where the arithmetic changes shape (`/0`, `/32`, `/64`,
 `/65`, `/128`, and the last address of each family).
 
-Not yet done: benchmarks in the repository, and a comparison against `bart`,
-`netipx` and `cidranger` on real provider corpora. A prototype of this design
-measured 15.0 ns against bart's 42.8 on a scattered all-hit workload, which is
-what motivated writing it properly, but that figure is from the prototype and
-not from this code.
+One bug worth recording, since the test that caught it is the one worth
+keeping. The interval sweep ordered a prefix's start before another's end at
+the same address; because prefixes of one length share a slot in the active
+set, the ending prefix then cleared the starting one and it vanished from part
+of the table. Every individual lookup still returned a plausible prefix. Only
+comparison against an exhaustive scan found it.
+
+Not yet done: a comparison against `bart`, `netipx` and `cidranger` on real
+provider corpora. The numbers above are against this package's own synthetic
+corpora and say nothing about how it compares. A prototype measured 15.0 ns
+against bart's 42.8 on a scattered all-hit workload, which is what motivated
+writing this properly, but that figure belongs to the prototype and the index
+strategy has changed since.
 
 ## License
 

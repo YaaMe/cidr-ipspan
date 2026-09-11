@@ -70,21 +70,26 @@ func buildTable4(spans []span4) table4 {
 	return t
 }
 
-func (t *table4) contains(v uint32) bool {
+// find returns the index of the span containing v, or -1. Returning the index
+// rather than a bool is what lets Table share this path with Set: membership
+// costs the same either way, and only resolving the prefix costs more.
+func (t *table4) find(v uint32) int32 {
 	if len(t.spans) == 0 {
-		return false
+		return -1
 	}
 	for i := t.first[v>>t.shift]; i < int32(len(t.spans)); i++ {
 		s := &t.spans[i]
 		if v < s.lo {
-			return false
+			return -1
 		}
 		if v <= s.hi {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
+
+func (t *table4) contains(v uint32) bool { return t.find(v) >= 0 }
 
 func (t *table4) worstScan() int {
 	worst := 0
@@ -119,22 +124,24 @@ func buildTable6(spans []span6) table6 {
 	return t
 }
 
-func (t *table6) contains(v u128) bool {
+func (t *table6) find(v u128) int32 {
 	if len(t.spans) == 0 {
-		return false
+		return -1
 	}
 	slot := v.hi >> (64 - (128 - t.shift))
 	for i := t.first[slot]; i < int32(len(t.spans)); i++ {
 		s := &t.spans[i]
 		if v.less(s.lo) {
-			return false
+			return -1
 		}
 		if !s.hi.less(v) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
+
+func (t *table6) contains(v u128) bool { return t.find(v) >= 0 }
 
 func (t *table6) worstScan() int {
 	nbits := 128 - t.shift

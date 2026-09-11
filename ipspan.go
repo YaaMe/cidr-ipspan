@@ -11,10 +11,15 @@
 // is one array read, then a comparison against one or two spans — no hashing,
 // no tree descent, and no branch-heavy binary search.
 //
-// Two consequences are worth knowing before choosing this. Membership is all
-// it answers: there is no way to ask which prefix matched, or to attach a value
-// to one, so it is not a routing table. And the set is immutable, built once
-// from a Builder; adding an address means building again.
+// Two structures are offered. A Set forgets the prefixes and answers only
+// membership; a Table also records which prefix an address matched, at the cost
+// of more intervals and more memory. Returning the prefix itself is free once
+// you are paying for a Table, because the answer is precomputed per interval
+// rather than searched for.
+//
+// Neither is a routing table: no value can be attached to a prefix. The set is
+// also immutable, built once from a Builder; adding an address means building
+// again.
 package ipspan
 
 import (
@@ -39,9 +44,27 @@ type Set struct {
 // Nothing is merged or indexed until Build is called, so adding is cheap and
 // order does not matter.
 type Builder struct {
-	v4  []span4
-	v6  []span6
+	v4 []span4
+	v6 []span6
+
+	// The original prefixes, kept only so BuildTable can file them under their
+	// spans. BuildSet ignores them, and they are dropped with the Builder.
+	v4Prefixes []prefix4
+	v6Prefixes []prefix6
+
 	err error
+}
+
+// prefix4 and prefix6 pair a prefix with its start address, so assigning it to
+// a span is a comparison rather than a re-derivation.
+type prefix4 struct {
+	lo uint32
+	p  netip.Prefix
+}
+
+type prefix6 struct {
+	lo u128
+	p  netip.Prefix
 }
 
 // AddPrefix adds every address in p. An invalid prefix is recorded as an error
@@ -57,6 +80,7 @@ func (b *Builder) AddPrefix(p netip.Prefix) {
 		lo := beUint32(addr.As4())
 		hi := lo | hostMask32(p.Bits())
 		b.v4 = append(b.v4, span4{lo, hi})
+		b.v4Prefixes = append(b.v4Prefixes, prefix4{lo, p})
 		return
 	}
 	if addr.Is4In6() {
@@ -68,6 +92,7 @@ func (b *Builder) AddPrefix(p netip.Prefix) {
 	lo := u128FromBytes(addr.As16())
 	hi := lo.or(hostMask128(p.Bits()))
 	b.v6 = append(b.v6, span6{lo, hi})
+	b.v6Prefixes = append(b.v6Prefixes, prefix6{lo, p})
 }
 
 // AddCIDR adds every address in n, for callers holding the older net.IPNet.
@@ -118,12 +143,14 @@ func (b *Builder) setErr(err error) {
 	}
 }
 
-// Build merges everything added into disjoint spans and indexes them.
+// BuildSet merges everything added into disjoint spans and indexes them,
+// discarding the prefixes. Use BuildTable instead if you need to know which
+// prefix an address matched.
 //
 // It reports the first error seen while adding, if any; on error the returned
 // Set is still usable and holds everything that was added successfully, so a
 // caller who wants to ignore malformed input may.
-func (b *Builder) Build() (*Set, error) {
+func (b *Builder) BuildSet() (*Set, error) {
 	s := &Set{
 		v4: buildTable4(mergeSpans4(b.v4)),
 		v6: buildTable6(mergeSpans6(b.v6)),
