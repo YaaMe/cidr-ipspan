@@ -128,12 +128,38 @@ set, the ending prefix then cleared the starting one and it vanished from part
 of the table. Every individual lookup still returned a plausible prefix. Only
 comparison against an exhaustive scan found it.
 
-Not yet done: a comparison against `bart`, `netipx` and `cidranger` on real
-provider corpora. The numbers above are against this package's own synthetic
-corpora and say nothing about how it compares. A prototype measured 15.0 ns
-against bart's 42.8 on a scattered all-hit workload, which is what motivated
-writing this properly, but that figure belongs to the prototype and the index
-strategy has changed since.
+## Compared with other libraries
+
+Measured against eight providers' published ranges in [bench/](bench/), which
+has the full tables. ns/op, scattered probes:
+
+| corpus | mix | **ipspan.Set** | bart | netipx | cidranger |
+|---|---|---|---|---|---|
+| aws | all hit | **24.3** | 31.2 | 72.3 | 219.9 |
+| github | all hit | **29.8** | 31.9 | 83.2 | 220.5 |
+| linode | all hit | **13.3** | 14.6 | 45.7 | 194.3 |
+| aws | all miss | 3.0 | **2.7** | 51.8 | 23.1 |
+
+`Set` is the fastest membership structure of the four on hits, on all three
+corpus shapes, at 12–24 bytes per block against bart's 54–71.
+
+For longest-prefix match the verdict reverses:
+
+| corpus | mix | Table | **bart** |
+|---|---|---|---|
+| aws | all hit | 65.8 | **37.0** |
+| linode | all hit | 110.9 | **14.8** |
+
+**bart wins that, and on `linode` by 7x.** It is the same trade seen from the
+other side: membership lets a structure throw information away — `linode`'s
+5409 prefixes really are 95 spans — while longest-prefix match forbids it, so
+`Table` must cut an interval wherever the winner changes and ends up with more
+pieces than it started with. bart keeps the hierarchy rather than flattening
+it.
+
+So `Table` is currently dominated for its own use case. It is kept because it
+is correct, agrees with bart everywhere, and wins on pure misses (3.3 against
+3.5), but if you need the matching prefix, use bart.
 
 ## License
 
