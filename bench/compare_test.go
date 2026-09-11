@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/YaaMe/ipspan"
+	"github.com/YaaMe/cidr-ipspan"
 	"github.com/gaissmai/bart"
 	"github.com/yl2chen/cidranger"
 	"go4.org/netipx"

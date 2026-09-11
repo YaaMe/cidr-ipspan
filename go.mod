@@ -1,3 +1,3 @@
-module github.com/YaaMe/ipspan
+module github.com/YaaMe/cidr-ipspan
 
 go 1.21

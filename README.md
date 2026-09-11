@@ -3,11 +3,20 @@
 Is this IP address in this set of CIDR blocks? For a set that is fixed once
 built.
 
+```sh
+go get github.com/YaaMe/cidr-ipspan
+```
+
+The module path and the package name differ — the module is `cidr-ipspan`, the
+package is `ipspan` — so the import is worth naming explicitly.
+
 ```go
+import ipspan "github.com/YaaMe/cidr-ipspan"
+
 var b ipspan.Builder
 b.AddPrefixString("52.95.110.0/24")
 b.AddPrefixString("2620:107:300f::/48")
-set, err := b.Build()
+set, err := b.BuildSet()
 
 set.Contains(netip.MustParseAddr("52.95.110.1")) // true
 ```
