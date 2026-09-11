@@ -111,9 +111,43 @@ Neither is a routing table. There is no way to attach a value to a prefix, and
 `Table` resolves one prefix rather than walking a hierarchy. For that, use a
 trie such as [gaissmai/bart](https://github.com/gaissmai/bart).
 
-**Both are immutable.** A `Builder` accumulates; `BuildSet` or `BuildTable`
-merges and indexes; the result is read-only and safe for concurrent use. Adding
-an address means building again.
+## Why it cannot be mutated
+
+A `Builder` accumulates; `BuildSet` or `BuildTable` merges and indexes; the
+result is read-only and safe for concurrent use. Adding an address means
+building again — the whole thing, from the blocks.
+
+That is a consequence of the design rather than a missing feature, and it is
+worth spelling out because "immutable" on its own reads like something nobody
+got round to.
+
+**Inserting is not local.** A trie mutates one node and is done, which is why
+`bart` inserts in time proportional to the prefix length. Here the speed comes
+from precomputing over the whole corpus, and all three parts of that are global:
+the span array is sorted, so an insert is a memmove; the index holds a span
+*number* per slot, so every entry after the insertion point shifts by one; and a
+prefix outside the corpus's current extent changes the leading bits every span
+shares, which rebuilds the index outright. Rebuilding the AWS list from scratch
+takes 2.6 ms. That is nothing per hour and far too much per request.
+
+**Deleting from a `Set` is not possible at all**, and the reason is the same one
+that makes it fast. `10.0.0.0/8` and `10.1.0.0/16` become one span; remove the
+`/16` and the `/8` still covers that range, but the span records neither, so
+there is no way to know how much of it to give back. The information a delete
+needs is exactly the information the merge threw away. Keeping it means keeping
+the prefixes, at which point it is a `Table` — which can delete, by re-running
+the sweep.
+
+**What a mutable version would cost.** The usual escape is a small dynamic
+overlay beside the static structure: insert into the overlay, query both,
+rebuild when it fills. At 64 spans that amortises to roughly 40 µs per insert.
+But every query then pays for the overlay scan, and queries being fast is the
+only reason to choose this over a trie. Bentley–Saxe is worse for the same
+reason — logarithmic amortised inserts, but a query touches all 17 levels at
+100k blocks.
+
+So if the set changes at runtime, use [gaissmai/bart](https://github.com/gaissmai/bart). Mutability is designed into
+it; here it would be bolted onto the side of the thing that makes this fast.
 
 ## When it fits
 

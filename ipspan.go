@@ -17,9 +17,12 @@
 // you are paying for a Table, because the answer is precomputed per interval
 // rather than searched for.
 //
-// Neither is a routing table: no value can be attached to a prefix. The set is
-// also immutable, built once from a Builder; adding an address means building
-// again.
+// Neither is a routing table: no value can be attached to a prefix. And both
+// are immutable — built once from a Builder, with no way to insert afterwards,
+// because the speed comes from precomputing over the whole corpus and every
+// part of that precomputation is global. A Set additionally cannot support
+// deletion even in principle: merging discards which prefixes contributed to a
+// span, which is exactly what a delete would need. See the README.
 package ipspan
 
 import (
