@@ -228,38 +228,49 @@ func BenchmarkMembership(b *testing.B) {
 		set, tbl := buildSet(all), buildTable(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
 
-		for _, mix := range []struct {
-			name  string
-			ratio float64
-		}{{"AllHit", 1.0}, {"HalfHit", 0.5}, {"AllMiss", 0.0}} {
-			ips, addrs := probes(c.V4, mix.ratio, true, 8192)
-			pre := fmt.Sprintf("%s/%s/", c.Name, mix.name)
+		// Both families: the two index paths behave differently enough that
+		// probing only IPv4 hides half the picture.
+		for _, fam := range []struct {
+			label string
+			nets  []*net.IPNet
+			v4    bool
+		}{{"v4", c.V4, true}, {"v6", c.V6, false}} {
+			for _, mix := range []struct {
+				name  string
+				ratio float64
+			}{{"AllHit", 1.0}, {"HalfHit", 0.5}, {"AllMiss", 0.0}} {
+				if len(fam.nets) == 0 {
+					continue
+				}
+				ips, addrs := probes(fam.nets, mix.ratio, fam.v4, 8192)
+				pre := fmt.Sprintf("%s/%s/%s/", c.Name, fam.label, mix.name)
 
-			b.Run(pre+"ipspanSet", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					set.Contains(addrs[i&8191])
-				}
-			})
-			b.Run(pre+"ipspanTable", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					tbl.Contains(addrs[i&8191])
-				}
-			})
-			b.Run(pre+"bart", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					bt.Contains(addrs[i&8191])
-				}
-			})
-			b.Run(pre+"cidranger", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					cg.Contains(ips[i&8191])
-				}
-			})
-			b.Run(pre+"netipx", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					nx.Contains(addrs[i&8191])
-				}
-			})
+				b.Run(pre+"ipspanSet", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						set.Contains(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"ipspanTable", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						tbl.Contains(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"bart", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						bt.Contains(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"cidranger", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						cg.Contains(ips[i&8191])
+					}
+				})
+				b.Run(pre+"netipx", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						nx.Contains(addrs[i&8191])
+					}
+				})
+			}
 		}
 	}
 }
@@ -278,23 +289,32 @@ func BenchmarkLookup(b *testing.B) {
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		tbl, bt := buildTable(all), buildBart(all)
 
-		for _, mix := range []struct {
-			name  string
-			ratio float64
-		}{{"AllHit", 1.0}, {"HalfHit", 0.5}, {"AllMiss", 0.0}} {
-			_, addrs := probes(c.V4, mix.ratio, true, 8192)
-			pre := fmt.Sprintf("%s/%s/", c.Name, mix.name)
+		for _, fam := range []struct {
+			label string
+			nets  []*net.IPNet
+			v4    bool
+		}{{"v4", c.V4, true}, {"v6", c.V6, false}} {
+			for _, mix := range []struct {
+				name  string
+				ratio float64
+			}{{"AllHit", 1.0}, {"HalfHit", 0.5}, {"AllMiss", 0.0}} {
+				if len(fam.nets) == 0 {
+					continue
+				}
+				_, addrs := probes(fam.nets, mix.ratio, fam.v4, 8192)
+				pre := fmt.Sprintf("%s/%s/%s/", c.Name, fam.label, mix.name)
 
-			b.Run(pre+"ipspanTable", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					tbl.Lookup(addrs[i&8191])
-				}
-			})
-			b.Run(pre+"bart", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					bt.Lookup(addrs[i&8191])
-				}
-			})
+				b.Run(pre+"ipspanTable", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						tbl.Lookup(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"bart", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						bt.Lookup(addrs[i&8191])
+					}
+				})
+			}
 		}
 	}
 }

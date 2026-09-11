@@ -24,49 +24,72 @@ eight are checked for correctness.
 
 ## Membership
 
-ns/op, minimum of three runs, Go 1.26 on darwin/arm64 (Apple M2):
+ns/op, minimum of three runs, Go 1.26 on darwin/arm64 (Apple M2). Both families
+are probed: the two index paths behave differently enough that measuring only
+IPv4 hides half the picture.
 
-| corpus | mix | **ipspan.Set** | bart | netipx | cidranger |
-|---|---|---|---|---|---|
-| aws | all hit | **24.3** | 31.2 | 72.3 | 219.9 |
-| aws | half hit | **17.3** | 18.1 | 65.1 | 129.2 |
-| aws | all miss | 3.0 | **2.7** | 51.8 | 23.1 |
-| github | all hit | **29.8** | 31.9 | 83.2 | 220.5 |
-| github | half hit | 19.4 | **19.0** | 70.0 | 130.5 |
-| github | all miss | 3.0 | **2.7** | 52.2 | 23.1 |
-| linode | all hit | **13.3** | 14.6 | 45.7 | 194.3 |
-| linode | half hit | **11.7** | 12.0 | 42.2 | 115.8 |
-| linode | all miss | 3.0 | **2.7** | 33.9 | 23.3 |
+| corpus | fam | mix | **ipspan.Set** | bart | netipx | cidranger |
+|---|---|---|---|---|---|---|
+| aws | v4 | all hit | **23.6** | 31.2 | — | — |
+| aws | v4 | half hit | **15.4** | 17.6 | — | — |
+| aws | v4 | all miss | 3.6 | **2.7** | — | — |
+| github | v4 | all hit | 32.3 | **32.0** | — | — |
+| linode | v4 | all hit | **14.4** | 14.6 | — | — |
+| linode | v4 | half hit | **10.8** | 12.1 | — | — |
+| aws | **v6** | all hit | **54.3** | 60.1 | — | — |
+| aws | **v6** | half hit | **33.1** | 40.9 | — | — |
+| aws | **v6** | all miss | **4.2** | 8.9 | — | — |
+| github | **v6** | all hit | **53.0** | 76.8 | — | — |
+| github | **v6** | half hit | **32.9** | 40.7 | — | — |
+| linode | **v6** | all hit | **23.0** | 41.8 | — | — |
+| linode | **v6** | half hit | **18.3** | 23.7 | — | — |
 
-**`ipspan.Set` is the fastest membership structure here on hits**, on all three
-shapes including the fragmented one, and ties on half-hit mixes. bart keeps a
-small edge on pure misses, 2.7 against 3.0.
+netipx and cidranger are omitted from this table for width; they run 45–220 ns
+on the same probes, and the full set is in the benchmark output.
+
+**IPv4 is close.** `ipspan.Set` wins on `aws`, ties on `github` and `linode`,
+and loses the pure-miss case to bart at 3.6 against 2.7.
+
+**IPv6 is not close.** `ipspan.Set` is ahead everywhere except one miss case —
+23.0 against 41.8 on `linode`, 53.0 against 76.8 on `github`.
+
+The asymmetry has the same cause as the advantage this design was built for.
+A trie descends one node per stride, so its cost grows with how deep the match
+lies, and IPv6 provider prefixes are deep: AWS publishes mostly `/40`s, with
+`/48`s and `/64`s besides. A span lookup does not care how long the prefix is.
 
 ## Longest-prefix match
 
 Only two of these answer which prefix matched.
 
-| corpus | mix | ipspan.Table | **bart** |
-|---|---|---|---|
-| aws | all hit | 65.8 | **37.0** |
-| aws | half hit | 38.3 | **21.1** |
-| aws | all miss | **3.3** | 3.5 |
-| github | all hit | 45.1 | **34.0** |
-| github | half hit | 27.3 | **20.4** |
-| linode | all hit | 110.9 | **14.8** |
-| linode | half hit | 60.0 | **12.1** |
+| corpus | fam | mix | ipspan.Table | bart |
+|---|---|---|---|---|
+| aws | v4 | all hit | 40.2 | **37.0** |
+| github | v4 | all hit | 44.4 | **34.0** |
+| linode | v4 | all hit | 62.3 | **14.8** |
+| linode | v4 | half hit | 34.9 | **12.2** |
+| aws | v6 | all hit | 62.6 | **54.6** |
+| aws | v6 | half hit | **37.0** | 38.8 |
+| aws | v6 | all miss | **4.5** | 10.5 |
+| github | v6 | all hit | **62.1** | 72.5 |
+| github | v6 | half hit | **37.2** | 39.4 |
+| linode | v6 | all hit | **39.8** | 41.7 |
 
-**bart wins longest-prefix match, and on `linode` it is not close** — 14.8
-against 110.9.
+**bart wins IPv4 decisively** — 14.8 against 62.3 on `linode`. IPv6 is a draw,
+with `Table` ahead on half-hit mixes and misses and behind on pure hits.
 
-That is the same trade seen from the other side. Membership lets a structure
-throw information away, and `linode`'s 5409 prefixes really are 95 spans, so
-`Set` gets faster the more the data collapses. Longest-prefix match forbids
-throwing anything away: every prefix must stay distinguishable, so `Table` has
-to cut an interval wherever the winner changes and ends up with *more* pieces
-than it started with. bart keeps the hierarchy instead of flattening it, and a
-`/8` with a hundred `/24`s nested in it stays one node with a hundred children
-rather than becoming two hundred intervals.
+The IPv4 result is the same trade seen from the other side. Membership lets a
+structure throw information away, and `linode`'s 5409 prefixes really are 95
+spans, so `Set` gets faster the more the data collapses. Longest-prefix match
+forbids throwing anything away: every prefix must stay distinguishable, so
+`Table` cuts an interval wherever the winner changes and ends up with *more*
+pieces than it started with — exactly where `Set` ends up with fewest. bart
+keeps the hierarchy instead of flattening it: a `/8` with a hundred `/24`s
+nested inside stays one node with a hundred children rather than two hundred
+intervals.
+
+IPv6 holds up better because bart pays for depth there, and that partly offsets
+the flattening.
 
 ## Memory
 
@@ -85,17 +108,19 @@ ranges, but pays for it in the lookup: it binary-searches, and that is `log n`
 unpredictable branches, which is why it is the slowest thing here on a miss
 despite being the smallest.
 
-`ipspan.Table` is larger than bart as well as slower, so it is currently
-dominated for its own use case. Roughly 2.6x of its size is slack rather than
-necessity — `netip.Prefix` is 32 bytes where an IPv4 prefix needs five, and
-intervals store both ends where contiguity means the next one's start implies
-this one's end — but closing that would not obviously close a 7x speed gap.
+`ipspan.Table` is larger than bart as well as slower on IPv4. Roughly 2.6x of
+its size is slack rather than necessity — `netip.Prefix` is 32 bytes where an
+IPv4 prefix needs five, and intervals store both ends where contiguity means
+the next one's start implies this one's end — but closing that would not close a
+4x speed gap on `linode`.
 
 ## Reading this
 
-Use `ipspan.Set` for membership; it is the fastest and smallest option here
-that is not `netipx`, and it beats `netipx` on speed by a wide margin.
+**Membership:** use `ipspan.Set`. It wins or ties on IPv4 and wins IPv6 clearly,
+at a third of bart's memory. bart keeps a small edge on pure IPv4 misses, 2.7
+against 3.6.
 
-Use `bart` if you need to know which prefix matched. `ipspan.Table` works and
-agrees with bart everywhere, but it has no case where it wins except pure
-misses.
+**Which prefix matched, IPv4:** use bart.
+
+**Which prefix matched, IPv6:** either. `ipspan.Table` is ahead on mixed and
+miss-heavy workloads, bart on pure hits.

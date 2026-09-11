@@ -104,7 +104,9 @@ ACLs, blocklists, geo-IP membership, abuse filtering.
 
 Check your own data rather than trusting the table above — `Spans()` reports
 how far your blocks collapsed and `WorstScan()` the longest run of spans a
-single lookup can compare. A worst scan in the low single digits means the
+single lookup may walk before it gives up and searches instead. On provider
+corpora that run reaches the hundreds for IPv6, which is why the walk has a
+limit at all. A worst scan in the low single digits means the
 index is doing its job; a large one means your spans crowd into one slot, which
 is the shape this handles least well.
 
@@ -131,35 +133,30 @@ comparison against an exhaustive scan found it.
 ## Compared with other libraries
 
 Measured against eight providers' published ranges in [bench/](bench/), which
-has the full tables. ns/op, scattered probes:
+has the full tables. ns/op, scattered probes, both address families:
 
-| corpus | mix | **ipspan.Set** | bart | netipx | cidranger |
-|---|---|---|---|---|---|
-| aws | all hit | **24.3** | 31.2 | 72.3 | 219.9 |
-| github | all hit | **29.8** | 31.9 | 83.2 | 220.5 |
-| linode | all hit | **13.3** | 14.6 | 45.7 | 194.3 |
-| aws | all miss | 3.0 | **2.7** | 51.8 | 23.1 |
+| corpus | fam | mix | **ipspan.Set** | bart |
+|---|---|---|---|---|
+| aws | v4 | all hit | **23.6** | 31.2 |
+| github | v4 | all hit | 32.3 | **32.0** |
+| linode | v4 | all hit | **14.4** | 14.6 |
+| aws | v4 | all miss | 3.6 | **2.7** |
+| aws | **v6** | all hit | **54.3** | 60.1 |
+| github | **v6** | all hit | **53.0** | 76.8 |
+| linode | **v6** | all hit | **23.0** | 41.8 |
+| aws | **v6** | all miss | **4.2** | 8.9 |
 
-`Set` is the fastest membership structure of the four on hits, on all three
-corpus shapes, at 12–24 bytes per block against bart's 54–71.
+IPv4 is close — `Set` wins on `aws`, ties elsewhere, loses pure misses. **IPv6
+is not close**, because a trie pays for depth and provider IPv6 prefixes are
+deep (AWS publishes mostly `/40`s), while a span lookup does not care how long
+the prefix is. Memory is 12–24 bytes per block against bart's 54–71.
 
-For longest-prefix match the verdict reverses:
-
-| corpus | mix | Table | **bart** |
-|---|---|---|---|
-| aws | all hit | 65.8 | **37.0** |
-| linode | all hit | 110.9 | **14.8** |
-
-**bart wins that, and on `linode` by 7x.** It is the same trade seen from the
-other side: membership lets a structure throw information away — `linode`'s
-5409 prefixes really are 95 spans — while longest-prefix match forbids it, so
-`Table` must cut an interval wherever the winner changes and ends up with more
-pieces than it started with. bart keeps the hierarchy rather than flattening
-it.
-
-So `Table` is currently dominated for its own use case. It is kept because it
-is correct, agrees with bart everywhere, and wins on pure misses (3.3 against
-3.5), but if you need the matching prefix, use bart.
+For longest-prefix match the verdict splits by family: bart wins IPv4
+decisively (14.8 against 62.3 on `linode`), IPv6 is a draw. Same trade seen
+from the other side — membership lets a structure discard information, and
+`linode`'s 5409 prefixes really are 95 spans, while longest-prefix match
+forbids discarding anything, so `Table` ends up with *more* pieces than it
+started with exactly where `Set` ends up with fewest.
 
 ## License
 
