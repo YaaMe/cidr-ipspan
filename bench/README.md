@@ -9,9 +9,18 @@ of every `go get`.
 
 ```sh
 ./fetch.sh                          # refresh corpora from each provider
-go test -v ./...                    # agreement and footprint
+go test -v ./...                    # agreement
 go test -run '^$' -bench . ./...    # the comparison
 ```
+
+`BenchmarkBuild` reports construction time together with what each structure
+*retains*, as a `B/block` metric. Go's own `B/op` counts allocation churn
+during the build rather than what survives it, so retained size is measured
+with `MemStats` and surfaced as a custom metric.
+
+Everything here runs on Go 1.26, which `go.mod` pins: bart requires 1.24. The
+toolchain is worth naming because it moves the numbers — the same benchmarks
+on the library side run 13–33% slower on Go 1.22.
 
 `bart` appears twice in the membership table. `bart.Lite` stores no payload,
 which is what `ipspan.Set` does, so it is the fair opponent; `bart.Table` was
@@ -98,22 +107,32 @@ intervals.
 IPv6 holds up better because bart pays for depth there, and that partly offsets
 the flattening.
 
-## Memory
+## Memory and build cost
 
-bytes per block:
+From `BenchmarkBuild`. Bytes per block is what the structure retains, not what
+it allocated getting there:
 
-| corpus | ipspan.Set | ipspan.Table | bart | netipx | cidranger |
-|---|---|---|---|---|---|
-| aws | 24 | 90 | 71 | **14** | 503 |
-| github | 22 | 83 | 67 | **18** | 508 |
-| linode | 12 | 80 | 54 | — | 497 |
+| corpus | | ipspan.Set | ipspan.Table | bart.Lite | bart.Table | netipx | cidranger |
+|---|---|---|---|---|---|---|---|
+| aws | B/block | 24.1 | 89.8 | 33.3 | 71.4 | **13.9** | 502.5 |
+| aws | build ms | 2.6 | 6.9 | **1.9** | 2.4 | 3.6 | 29.7 |
+| github | B/block | 22.5 | 82.6 | 26.9 | 67.3 | **18.0** | 508.3 |
+| github | build ms | 1.4 | 4.6 | **1.2** | 1.4 | 2.1 | 17.7 |
+| linode | B/block | 11.8 | 79.6 | 21.6 | 53.9 | **1.1** | 497.1 |
+| linode | build ms | 1.0 | 3.0 | **0.7** | 0.9 | 1.6 | 10.5 |
 
-`ipspan.Set` costs a third of bart and falls as the data collapses — 24 bytes
-per block on `aws`, 12 on `linode` — because what it stores is the *shape* of
-the address set, not the blocks. `netipx` is smaller still and also merges to
-ranges, but pays for it in the lookup: it binary-searches, and that is `log n`
-unpredictable branches, which is why it is the slowest thing here on a miss
-despite being the smallest.
+`ipspan.Set` is smaller than `bart.Lite` on every corpus and falls as the data
+collapses — 24 bytes per block on `aws`, 12 on `linode` — because what it
+stores is the *shape* of the address set rather than the blocks. `netipx` is
+smaller still, and its 1.1 bytes per block on `linode` is the clearest evidence
+that the collapse is real: 5505 prefixes really are 95 spans. It pays for that
+in the lookup, binary-searching where this indexes.
+
+Build cost tracks it: `ipspan.Set` takes about a third longer than `bart.Lite`
+because merging needs a sort, and `ipspan.Table` two to three times that again
+because the sweep emits far more intervals. All of them are milliseconds for a
+whole provider list, which for a structure built once is not the interesting
+column.
 
 `ipspan.Table` is larger than bart as well as slower on IPv4. Roughly 2.6x of
 its size is slack rather than necessity — `netip.Prefix` is 32 bytes where an

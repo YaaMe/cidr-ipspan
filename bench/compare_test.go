@@ -195,6 +195,72 @@ func TestAgree(t *testing.T) {
 	}
 }
 
+// BenchmarkBuild reports what each structure costs to construct and to hold.
+//
+// Retained size is not something Go's allocation counters can report — B/op
+// measures churn during the build, not what survives it — so it is measured
+// with MemStats and surfaced as a custom metric. All eight corpora are covered
+// rather than the three the lookup benchmarks use, because memory does not take
+// long to measure and the providers differ more in shape than in size.
+func BenchmarkBuild(b *testing.B) {
+	corpora, err := Load("")
+	if err != nil {
+		b.Skipf("no corpora: %v", err)
+	}
+	for _, c := range corpora {
+		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
+		for _, im := range []struct {
+			name  string
+			build func() any
+		}{
+			{"ipspanSet", func() any { return buildSet(all) }},
+			{"ipspanTable", func() any { return buildTable(all) }},
+			{"bartLite", func() any { return buildBartLite(all) }},
+			{"bartTable", func() any { return buildBart(all) }},
+			{"netipx", func() any { return buildNetipx(all) }},
+			{"cidranger", func() any { return buildCidranger(all) }},
+		} {
+			im := im
+			b.Run(c.Name+"/"+im.name, func(b *testing.B) {
+				retained := retainedBytes(im.build, all)
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					sinkAny = im.build()
+				}
+				b.StopTimer()
+				// After the loop, not before: ResetTimer clears the custom
+				// metric map, so anything reported earlier is silently dropped.
+				b.ReportMetric(retained/float64(len(all)), "B/block")
+				b.ReportMetric(retained/(1<<20), "MB-held")
+			})
+		}
+	}
+}
+
+var sinkAny any
+
+// retainedBytes measures what a structure holds after construction, as opposed
+// to what it allocated on the way.
+//
+// The input is kept reachable on purpose: every structure here copies it, so
+// without that the collector would reclaim the source between the two samples
+// and the freed memory would cancel out the structure's own — which flatters
+// precisely the implementations that are careful about ownership.
+func retainedBytes(build func() any, keep any) float64 {
+	runtime.GC()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	h := build()
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	n := float64(int64(after.HeapAlloc) - int64(before.HeapAlloc))
+	runtime.KeepAlive(h)
+	runtime.KeepAlive(keep)
+	return n
+}
+
 func TestFootprint(t *testing.T) {
 	corpora, err := Load("")
 	if err != nil {

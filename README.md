@@ -58,26 +58,33 @@ into elementary intervals, and inside one of those the longest match never
 changes, so each interval stores its winner. Longest-prefix matching becomes
 the same indexed read membership is.
 
-ns/op, 8192 rotating addresses, darwin/arm64 (Apple M2), minimum of three runs:
+ns/op, 8192 rotating addresses, **Go 1.26** on darwin/arm64 (Apple M2),
+minimum of three runs:
 
 | blocks | mix | Set | Table.Contains | Table.Lookup |
 |---|---|---|---|---|
-| 1e3 | all hit | 5.9 | 7.2 | 7.4 |
-| 1e3 | half hit | 9.5 | 10.3 | 10.5 |
-| 1e3 | all miss | 4.2 | 4.5 | 4.5 |
-| 1e5 | all hit | 4.6 | 22.1 | 21.8 |
-| 1e5 | half hit | 10.0 | 15.5 | 15.8 |
-| 1e5 | all miss | 4.2 | 4.5 | 4.5 |
+| 1e3 | all hit | 5.6 | 6.5 | 6.8 |
+| 1e3 | half hit | 8.1 | 9.2 | 9.3 |
+| 1e3 | all miss | 3.7 | 3.9 | 4.3 |
+| 1e5 | all hit | 4.4 | 20.7 | 20.3 |
+| 1e5 | half hit | 8.1 | 14.4 | 13.9 |
+| 1e5 | all miss | 3.7 | 3.9 | 4.3 |
+
+The Go version matters more than it looks. The same benchmarks on Go 1.22 run
+13–33% slower — 4.4 becomes 5.8 on the 1e5 hit — and none of that is the
+Swiss-table map from Go 1.24, since nothing here uses a map. It is general
+code generation. Numbers from this package are only comparable to others
+measured on the same toolchain.
 
 **Returning the prefix is free.** `Lookup` costs what `Table.Contains` costs —
-21.8 against 22.1 — because the winner is one more array read, not a search.
+20.3 against 20.7 — because the winner is one more array read, not a search.
 Once you are paying for a `Table`, there is no reason to ask the weaker
 question.
 
 What a `Table` costs is intervals. Merging for membership joins everything
 touching; a `Table` must also cut wherever the winner changes, so 100000
 nested blocks give a `Set` 523 spans and a `Table` 183066 intervals. That is
-where the 4.6 against 22.1 comes from, and the memory:
+where the 4.4 against 20.7 comes from, and the memory:
 
 | blocks | Set | Table |
 |---|---|---|
