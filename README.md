@@ -1,5 +1,7 @@
 # ipspan
 
+[![CI](https://github.com/YaaMe/cidr-ipspan/actions/workflows/ci.yml/badge.svg)](https://github.com/YaaMe/cidr-ipspan/actions/workflows/ci.yml)
+
 Is this IP address in this set of CIDR blocks? For a set that is fixed once
 built.
 
@@ -178,6 +180,19 @@ from the other side — membership lets a structure discard information, and
 `linode`'s 5409 prefixes really are 95 spans, while longest-prefix match
 forbids discarding anything, so `Table` ends up with *more* pieces than it
 started with exactly where `Set` ends up with fewest.
+
+## Development
+
+```sh
+go test -race ./...                       # the library
+go test -run '^$' -bench . ./...          # Set against Table
+cd bench && go test -run '^$' -bench .    # against bart, netipx, cidranger
+```
+
+CI runs gofmt, vet, `go test -race` and a benchmark smoke run on Go 1.21, 1.24
+and stable. The `bench` module is skipped on 1.21: it depends on bart, which
+requires 1.24, and keeping that dependency out of the library is why the two
+are separate modules at all.
 
 ## License
 

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest version go.mod declares support for, the oldest the bench
+        # module can run on, and current stable.
+        go: ["1.21", "1.24", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # The whole point of this package is that a span lookup agrees with an
+      # exhaustive scan, so the race detector matters less here than the
+      # correctness properties do — but a Set is documented as safe for
+      # concurrent use, and that claim should be exercised.
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      - name: benchmarks compile and run
+        run: go test -run '^$' -bench . -benchtime 1x ./...
+
+      # bench/ is a separate module: it holds eight providers' published ranges
+      # and the comparison against bart, netipx and cidranger. bart requires Go
+      # 1.24, which is why it is a separate module and why this step is skipped
+      # on the oldest job — the library itself still builds on 1.21.
+      - name: bench module
+        if: matrix.go != '1.21'
+        run: |
+          cd bench
+          go vet ./...
+          go test -count=1 ./...
+          go test -run '^$' -bench . -benchtime 1x ./...
