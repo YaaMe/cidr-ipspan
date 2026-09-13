@@ -5,6 +5,12 @@
 Is this IP address in this set of CIDR blocks? For a set that is fixed once
 built.
 
+**For most uses, [gaissmai/bart](https://github.com/gaissmai/bart) is the
+better choice.** `bart.Fast` is faster than this package on every hit workload
+measured, and bart supports insert and delete where this is immutable once
+built. Two narrower cases are what this is for; see
+[Compared with other libraries](#compared-with-other-libraries).
+
 ```sh
 go get github.com/YaaMe/cidr-ipspan
 ```
@@ -218,7 +224,27 @@ the index skips the leading bits every span shares and rejects an outside
 address before reading a slot.
 
 **For longest-prefix match, use bart.** `ipspan.Table` is slower than both bart
-variants and larger than `bart.Table`; see [bench/](bench/) for the numbers.
+variants and larger than `bart.Table`; see [bench/](bench/) for the numbers. It
+is kept because `BuildTable` costs nothing extra to offer once the spans exist,
+not because there is a case for choosing it.
+
+### So when is this worth picking
+
+The whole difference is footprint. On the AWS corpus (11226 blocks) the three
+membership structures hold 0.26 MB, 0.36 MB and 1.20 MB — `ipspan.Set`,
+`bart.Lite`, `bart.Fast`. For one set in a server process that spread is about
+a megabyte and not worth thinking about: use `bart.Fast`.
+
+It starts to matter in two places:
+
+- **Many sets at once.** Per-tenant or per-customer ACLs, where 4.7x the memory
+  is multiplied by the number of sets you hold.
+- **IPv6-heavy membership at minimal footprint.** Against `bart.Lite`, the
+  nearest structure by size, `Set` is smaller *and* faster on most rows — 93.0
+  against 130.5 ns on `github` v6 hits, 39.9 against 74.4 on `linode` — because
+  a trie pays for depth and provider IPv6 prefixes are deep.
+
+Outside those, reach for bart.
 
 ## Development
 
