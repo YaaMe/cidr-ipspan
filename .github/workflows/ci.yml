@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So the amd64 figures can be re-measured on demand. A shared runner varies
+  # enough between machines that one run is not evidence; taking several and
+  # discarding outliers is.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -106,13 +110,13 @@ jobs:
       - name: comparison, GOAMD64=v1 (Go's default)
         env:
           GOAMD64: v1
-        run: cd bench && go test -run '^$' -bench 'BenchmarkMembership|BenchmarkLookup' -benchtime 200ms -count=3 ./... | tee /tmp/v1.txt
+        run: cd bench && go test -run '^$' -bench 'BenchmarkMembership|BenchmarkLookup' -benchtime 150ms -count=10 ./... | tee /tmp/v1.txt
 
       - name: comparison, GOAMD64=v3
         if: steps.cpu.outputs.v3 == 'yes'
         env:
           GOAMD64: v3
-        run: cd bench && go test -run '^$' -bench 'BenchmarkMembership|BenchmarkLookup' -benchtime 200ms -count=3 ./... | tee /tmp/v3.txt
+        run: cd bench && go test -run '^$' -bench 'BenchmarkMembership|BenchmarkLookup' -benchtime 150ms -count=10 ./... | tee /tmp/v3.txt
 
       - name: summary
         if: always()

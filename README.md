@@ -230,21 +230,26 @@ not because there is a case for choosing it.
 
 ### So when is this worth picking
 
-The whole difference is footprint. On the AWS corpus (11226 blocks) the three
-membership structures hold 0.26 MB, 0.36 MB and 1.20 MB — `ipspan.Set`,
-`bart.Lite`, `bart.Fast`. For one set in a server process that spread is about
-a megabyte and not worth thinking about: use `bart.Fast`.
+The architecture-independent difference is footprint. On the AWS corpus (11226
+blocks) the three membership structures hold 0.26 MB, 0.36 MB and 1.20 MB —
+`ipspan.Set`, `bart.Lite`, `bart.Fast`. For one set in a server process that
+spread is about a megabyte and not worth thinking about: use `bart.Fast`. It
+starts to matter when you hold many sets at once — per-tenant or per-customer
+ACLs, where 4.7x the memory is multiplied by the number of sets you keep.
 
-It starts to matter in two places:
+The other case is IPv6-heavy membership at that smaller footprint. Against
+`bart.Lite`, the nearest structure by size, `Set` is ahead on IPv6 hits —
+median of ten runs, darwin/arm64:
 
-- **Many sets at once.** Per-tenant or per-customer ACLs, where 4.7x the memory
-  is multiplied by the number of sets you hold.
-- **IPv6-heavy membership at minimal footprint.** Against `bart.Lite`, the
-  nearest structure by size, `Set` is smaller *and* faster on most rows — 93.0
-  against 130.5 ns on `github` v6 hits, 39.9 against 74.4 on `linode` — because
-  a trie pays for depth and provider IPv6 prefixes are deep.
+| v6, all hit | ipspan.Set | bart.Lite |
+|---|---|---|
+| aws | **93.8** | 100.4 |
+| github | **93.2** | 129.5 |
+| linode | **40.0** | 74.3 |
 
-Outside those, reach for bart.
+A trie pays for depth and provider IPv6 prefixes are deep, while a span lookup
+does not care how long the prefix is. How far that carries to other
+architectures is measured in CI rather than claimed here; see [bench/](bench/).
 
 ## Development
 
