@@ -5,6 +5,12 @@
 Is this IP address in this set of CIDR blocks? For a set that is fixed once
 built.
 
+**For most uses, [gaissmai/bart](https://github.com/gaissmai/bart) is the
+better choice.** `bart.Fast` is faster than this package on every hit workload
+measured, and bart supports insert and delete where this is immutable once
+built. Two narrower cases are what this is for; see
+[Compared with other libraries](#compared-with-other-libraries).
+
 ```sh
 go get github.com/YaaMe/cidr-ipspan
 ```
@@ -218,7 +224,32 @@ the index skips the leading bits every span shares and rejects an outside
 address before reading a slot.
 
 **For longest-prefix match, use bart.** `ipspan.Table` is slower than both bart
-variants and larger than `bart.Table`; see [bench/](bench/) for the numbers.
+variants and larger than `bart.Table`; see [bench/](bench/) for the numbers. It
+is kept because `BuildTable` costs nothing extra to offer once the spans exist,
+not because there is a case for choosing it.
+
+### So when is this worth picking
+
+The architecture-independent difference is footprint. On the AWS corpus (11226
+blocks) the three membership structures hold 0.26 MB, 0.36 MB and 1.20 MB —
+`ipspan.Set`, `bart.Lite`, `bart.Fast`. For one set in a server process that
+spread is about a megabyte and not worth thinking about: use `bart.Fast`. It
+starts to matter when you hold many sets at once — per-tenant or per-customer
+ACLs, where 4.7x the memory is multiplied by the number of sets you keep.
+
+The other case is IPv6-heavy membership at that smaller footprint. Against
+`bart.Lite`, the nearest structure by size, `Set` is ahead on IPv6 hits —
+median of ten runs, darwin/arm64:
+
+| v6, all hit | ipspan.Set | bart.Lite |
+|---|---|---|
+| aws | **93.8** | 100.4 |
+| github | **93.2** | 129.5 |
+| linode | **40.0** | 74.3 |
+
+A trie pays for depth and provider IPv6 prefixes are deep, while a span lookup
+does not care how long the prefix is. How far that carries to other
+architectures is measured in CI rather than claimed here; see [bench/](bench/).
 
 ## Development
 
