@@ -75,6 +75,17 @@ func buildBart(nets []*net.IPNet) *bart.Table[netip.Prefix] {
 	return t
 }
 
+// bart.Fast carries a payload like bart.Table but trades memory for speed, so
+// it is the faster opponent for the longest-prefix-match comparison. Suggested
+// by bart's author in YaaMe/cidrange-go#6.
+func buildBartFast(nets []*net.IPNet) *bart.Fast[netip.Prefix] {
+	t := new(bart.Fast[netip.Prefix])
+	for _, p := range prefixesOf(nets) {
+		t.Insert(p, p)
+	}
+	return t
+}
+
 func buildCidranger(nets []*net.IPNet) cidranger.Ranger {
 	r := cidranger.NewPCTrieRanger()
 	for _, n := range nets {
@@ -146,7 +157,7 @@ func TestAgree(t *testing.T) {
 	for _, c := range corpora {
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		set, tbl := buildSet(all), buildTable(all)
-		lite := buildBartLite(all)
+		lite, fast := buildBartLite(all), buildBartFast(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
 		pfxs := prefixesOf(all)
 
@@ -172,6 +183,9 @@ func TestAgree(t *testing.T) {
 			if got := lite.Contains(addrs[i]); got != want {
 				t.Fatalf("%s: bart.Lite(%s)=%v want %v", c.Name, addrs[i], got, want)
 			}
+			if got := fast.Contains(addrs[i]); got != want {
+				t.Fatalf("%s: bart.Fast(%s)=%v want %v", c.Name, addrs[i], got, want)
+			}
 			if got, _ := cg.Contains(ips[i]); got != want {
 				t.Fatalf("%s: cidranger(%s)=%v want %v", c.Name, ips[i], got, want)
 			}
@@ -188,6 +202,11 @@ func TestAgree(t *testing.T) {
 			}
 			if wantOK && gotP.Bits() != wantP.Bits() {
 				t.Fatalf("%s: Lookup(%s)=%s, bart=%s", c.Name, addrs[i], gotP, wantP)
+			}
+			fastP, fastOK := fast.Lookup(addrs[i])
+			if fastOK != wantOK || (wantOK && fastP.Bits() != wantP.Bits()) {
+				t.Fatalf("%s: bart.Fast Lookup(%s)=%s/%v, bart.Table=%s/%v",
+					c.Name, addrs[i], fastP, fastOK, wantP, wantOK)
 			}
 		}
 		t.Logf("%-14s %d blocks, %d probes: membership and LPM agree everywhere",
@@ -217,6 +236,7 @@ func BenchmarkBuild(b *testing.B) {
 			{"ipspanTable", func() any { return buildTable(all) }},
 			{"bartLite", func() any { return buildBartLite(all) }},
 			{"bartTable", func() any { return buildBart(all) }},
+			{"bartFast", func() any { return buildBartFast(all) }},
 			{"netipx", func() any { return buildNetipx(all) }},
 			{"cidranger", func() any { return buildCidranger(all) }},
 		} {
@@ -293,6 +313,7 @@ func TestFootprint(t *testing.T) {
 		measure("ipspan.Table", func() any { return buildTable(all) })
 		measure("bart.Lite", func() any { return buildBartLite(all) })
 		measure("bart.Table", func() any { return buildBart(all) })
+		measure("bart.Fast", func() any { return buildBartFast(all) })
 		measure("cidranger", func() any { return buildCidranger(all) })
 		measure("netipx", func() any { return buildNetipx(all) })
 	}
@@ -309,7 +330,7 @@ func BenchmarkMembership(b *testing.B) {
 		}
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		set, tbl := buildSet(all), buildTable(all)
-		lite := buildBartLite(all)
+		lite, fast := buildBartLite(all), buildBartFast(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
 		_ = bt
 
@@ -350,6 +371,11 @@ func BenchmarkMembership(b *testing.B) {
 						bt.Contains(addrs[i&8191])
 					}
 				})
+				b.Run(pre+"bartFast", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						fast.Contains(addrs[i&8191])
+					}
+				})
 				b.Run(pre+"cidranger", func(b *testing.B) {
 					for i := 0; i < b.N; i++ {
 						cg.Contains(ips[i&8191])
@@ -377,7 +403,7 @@ func BenchmarkLookup(b *testing.B) {
 			continue
 		}
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
-		tbl, bt := buildTable(all), buildBart(all)
+		tbl, bt, fast := buildTable(all), buildBart(all), buildBartFast(all)
 
 		for _, fam := range []struct {
 			label string
@@ -402,6 +428,11 @@ func BenchmarkLookup(b *testing.B) {
 				b.Run(pre+"bart", func(b *testing.B) {
 					for i := 0; i < b.N; i++ {
 						bt.Lookup(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"bartFast", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						fast.Lookup(addrs[i&8191])
 					}
 				})
 			}

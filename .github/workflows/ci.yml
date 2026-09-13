@@ -57,3 +57,77 @@ jobs:
           go vet ./...
           go test -count=1 ./...
           go test -run '^$' -bench . -benchtime 1x ./...
+
+  # Karl Gaissmaier asked in YaaMe/cidrange-go#6 whether the published figures
+  # came from amd64 with GOAMD64=v3 set. They did not: every number in the
+  # READMEs is darwin/arm64, where the flag does not exist. This job answers
+  # the question that was really being asked — does the conservative default
+  # amd64 target understate bart? — by running the comparison under v1 and v3.
+  #
+  # It is informational. Benchmarks on a shared runner are far too noisy to
+  # gate a merge on, so nothing here fails on a slow number, only on a
+  # benchmark that will not run at all.
+  amd64-goamd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # bench/ depends on gaissmai/bart, which requires Go 1.24.
+          go-version: stable
+
+      # A binary built for v3 uses instructions (AVX2, BMI2, FMA) that fault
+      # with SIGILL on a machine without them. GitHub's hosted runners have
+      # had them for years, but a self-hosted or future runner might not, and
+      # a SIGILL partway through a benchmark is a confusing way to discover it.
+      - name: check the runner supports v3
+        id: cpu
+        run: |
+          flags=$(grep -m1 '^flags' /proc/cpuinfo || true)
+          missing=
+          for f in avx2 bmi2 fma f16c movbe; do
+            case " $flags " in *" $f "*) ;; *) missing="$missing $f" ;; esac
+          done
+          if [ -n "$missing" ]; then
+            echo "v3=no" >> "$GITHUB_OUTPUT"
+            echo "runner lacks:$missing - the v3 half will be skipped"
+          else
+            echo "v3=yes" >> "$GITHUB_OUTPUT"
+            echo "runner supports v3"
+          fi
+
+      # Correctness first, on both membership and which-prefix-matched: a
+      # structure that answers wrongly can look fast for the wrong reason, and
+      # that is worth catching on a new architecture before timing is believed.
+      - name: agreement on amd64
+        run: cd bench && go test -count=1 ./...
+
+      - name: comparison, GOAMD64=v1 (Go's default)
+        env:
+          GOAMD64: v1
+        run: cd bench && go test -run '^$' -bench 'BenchmarkMembership|BenchmarkLookup' -benchtime 200ms -count=3 ./... | tee /tmp/v1.txt
+
+      - name: comparison, GOAMD64=v3
+        if: steps.cpu.outputs.v3 == 'yes'
+        env:
+          GOAMD64: v3
+        run: cd bench && go test -run '^$' -bench 'BenchmarkMembership|BenchmarkLookup' -benchtime 200ms -count=3 ./... | tee /tmp/v3.txt
+
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "## amd64 comparison"
+            echo
+            echo "CPU:$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2-)"
+            echo
+            echo '### GOAMD64=v1 (Go default)'
+            echo '```'
+            grep '^Benchmark' /tmp/v1.txt 2>/dev/null || echo '(not run)'
+            echo '```'
+            echo '### GOAMD64=v3'
+            echo '```'
+            grep '^Benchmark' /tmp/v3.txt 2>/dev/null || echo '(skipped: runner lacks the instructions)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -185,35 +185,40 @@ comparison against an exhaustive scan found it.
 ## Compared with other libraries
 
 Measured against eight providers' published ranges in [bench/](bench/), which
-has the full tables. ns/op, scattered probes, both address families:
+has the full tables. ns/op, scattered probes, both address families, Go 1.26 on
+darwin/arm64:
 
-| corpus | fam | mix | **ipspan.Set** | bart.Lite |
-|---|---|---|---|---|
-| aws | v4 | all hit | **23.5** | 30.9 |
-| github | v4 | all hit | 32.7 | **31.7** |
-| linode | v4 | all hit | 14.5 | **13.8** |
-| aws | v4 | all miss | 3.6 | **2.7** |
-| aws | **v6** | all hit | **53.9** | 60.1 |
-| github | **v6** | all hit | **52.8** | 75.9 |
-| linode | **v6** | all hit | **23.0** | 40.5 |
-| aws | **v6** | all miss | **4.2** | 8.4 |
+| corpus | fam | mix | ipspan.Set | bart.Lite | **bart.Fast** |
+|---|---|---|---|---|---|
+| aws | v4 | all hit | 39.7 | 51.7 | **33.0** |
+| github | v4 | all hit | 54.8 | 54.2 | **32.7** |
+| linode | v4 | all hit | 24.8 | 27.3 | **13.0** |
+| aws | v4 | all miss | 6.5 | **4.7** | 5.1 |
+| aws | **v6** | all hit | 93.6 | 100.9 | **56.8** |
+| github | **v6** | all hit | 93.0 | 130.5 | **63.7** |
+| linode | **v6** | all hit | 39.9 | 74.4 | **33.9** |
+| aws | **v6** | all miss | **7.4** | 17.3 | 12.3 |
 
-`bart.Lite` is bart's membership-only variant, which stores no payload — the
-same thing `Set` does. Measured against the full `bart.Table` it makes no
-difference, since `Contains` never reads the payload, but comparing against it
-is the honest framing.
+| | ipspan.Set | bart.Lite | bart.Fast |
+|---|---|---|---|
+| bytes per block (aws) | **24** | 33 | 112 |
 
-IPv4 is close — `Set` wins on `aws`, ties elsewhere, loses pure misses. **IPv6
-is not close**, because a trie pays for depth and provider IPv6 prefixes are
-deep (AWS publishes mostly `/40`s), while a span lookup does not care how long
-the prefix is. Memory is 12–24 bytes per block against bart's 54–71.
+**`bart.Fast` is faster than this package on every hit row**, by 1.2x to 1.9x,
+and it costs 4.7x the memory to be. An earlier revision of this README claimed
+IPv6 outright; that claim came from comparing only against `bart.Table` and
+`bart.Lite`, and bart's author corrected it in
+[cidrange-go#6](https://github.com/YaaMe/cidrange-go/issues/6).
 
-For longest-prefix match the verdict splits by family: bart wins IPv4
-decisively (14.8 against 62.3 on `linode`), IPv6 is a draw. Same trade seen
-from the other side — membership lets a structure discard information, and
-`linode`'s 5409 prefixes really are 95 spans, while longest-prefix match
-forbids discarding anything, so `Table` ends up with *more* pieces than it
-started with exactly where `Set` ends up with fewest.
+So the case for this package is footprint, not peak speed. At the nearest
+comparable footprint — `bart.Lite`, 33 bytes per block against 24 — `Set` wins
+IPv6 clearly (93.0 against 130.5 on `github`) and ties IPv4, because a trie
+pays for depth and provider IPv6 prefixes are deep, while a span lookup does
+not care how long the prefix is. It also wins IPv6 pure misses outright, since
+the index skips the leading bits every span shares and rejects an outside
+address before reading a slot.
+
+**For longest-prefix match, use bart.** `ipspan.Table` is slower than both bart
+variants and larger than `bart.Table`; see [bench/](bench/) for the numbers.
 
 ## Development
 
