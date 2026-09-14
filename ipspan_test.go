@@ -1,6 +1,7 @@
 package ipspan
 
 import (
+	"fmt"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -371,5 +372,53 @@ func TestAddRange(t *testing.T) {
 		if _, err := bb.BuildSet(); err == nil {
 			t.Errorf("AddRange(%s, %s) should have failed", bad[0], bad[1])
 		}
+	}
+}
+
+// The merge must copy out of the input's backing array, not return a window
+// into it.
+//
+// Merging in place is tempting and correct in every answer it gives, which is
+// why no correctness test catches it: the result has the length of the spans
+// but the capacity of the blocks, so a Set pins the whole input for its
+// lifetime. The overhead scales with the number of blocks, which means it is
+// worst exactly where this package is meant to be used — a 901,899-prefix
+// routing table collapsing to 67,888 spans retained 8.3 MB instead of 0.8.
+func TestMergeDoesNotPinTheInput(t *testing.T) {
+	// Many blocks, few spans: 4096 adjacent /24s are one span.
+	var b Builder
+	for i := 0; i < 4096; i++ {
+		b.AddPrefixString(fmt.Sprintf("10.%d.%d.0/24", i/256, i%256))
+	}
+	s, err := b.BuildSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v4, _ := s.Spans()
+	if v4 != 1 {
+		t.Fatalf("4096 adjacent /24s should be one span, got %d", v4)
+	}
+	if got := cap(s.v4.spans); got > 4 {
+		t.Errorf("spans has capacity %d for %d span(s): the input array is still pinned", got, v4)
+	}
+}
+
+func TestMergeDoesNotPinTheInputV6(t *testing.T) {
+	var b Builder
+	for i := 0; i < 1024; i++ {
+		b.AddPrefixString(fmt.Sprintf("2001:db8:%x::/48", i))
+	}
+	s, err := b.BuildSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, v6 := s.Spans()
+	if v6 != 1 {
+		t.Fatalf("1024 adjacent /48s should be one span, got %d", v6)
+	}
+	if got := cap(s.v6.spans); got > 4 {
+		t.Errorf("spans has capacity %d for %d span(s): the input array is still pinned", got, v6)
 	}
 }

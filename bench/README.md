@@ -79,8 +79,13 @@ this file claimed the opposite from the `aws` v6 row alone, where `Set`'s 7.4
 does beat `Lite`'s 17.5. That was one row generalised to a rule; `github` and
 `linode` go the other way.
 
-`Lite` and `Table` are within 2% of each other everywhere, because `Contains`
-never reads the payload.
+`Lite` and `Table` are within 2% of each other on *speed*, because `Contains`
+never reads the payload — but that is not what separates them. bart's author
+[made the point](https://github.com/YaaMe/cidrange-go/issues/6) that `Lite`
+exists for its **memory**: its nodes carry no room for a payload at all. The
+table below has it at 33 B/block against `Table`'s 71 on `aws`, and 15.0 MB
+against 15.3 on a routing table. Saying the distinction "changes no figure"
+was true of one axis and wrong about the other.
 
 **`cidrange` collapses on AWS IPv6** — 176 ns, and misses are no cheaper than
 hits, so the early exit is not firing and the lookup degrades to a scan. It is
@@ -146,6 +151,55 @@ lookup, binary-searching where this indexes.
 hardest: 136 bytes per block on `linode` against 106 on `aws`, while every other
 structure roughly halves. Bucketing by mask length does not benefit from
 adjacency the way merging does.
+
+## On a routing table
+
+Everything above is provider allocation lists, which is the workload this
+package was written for. They are also the shape that suits it: allocations
+barely nest. A routing table is announcements inside announcements, which is
+the case bart is built for, so it is the fairer test of whether the premise
+generalises.
+
+`bench/testdata/tier1-routes.txt.gz` is a full Internet routing table — 901,899
+IPv4 prefixes and 160,147 IPv6 — from [gaissmai/iprbench], MIT, redistributed
+with attribution. Unlike the provider corpora, which `fetch.sh` refreshes, and
+unlike a licensed commercial database, which cannot be committed at all, this
+one is fixed and public: figures taken from it can be checked by a reader.
+
+**The collapse holds.**
+
+| | prefixes | spans | |
+|---|---|---|---|
+| IPv4 | 901,899 | 67,888 | 92.5% gone |
+| IPv6 | 160,147 | 40,658 | 74.6% gone |
+
+Nesting turns out not to matter to it. A routing table nests heavily, but
+nesting is about *who announced* an address — and membership does not ask that.
+The address set underneath is still large contiguous runs, and 537,698 of the
+IPv4 prefixes are `/24`s, many of them adjacent.
+
+One structure per process, 1024 rotating probes, median of ten after outlier
+rejection:
+
+| | retained | lookup |
+|---|---|---|
+| **ipspan.Set** | **0.78 MB** | **6.5 ns** |
+| bart.Lite | 14.97 MB | 11.3 ns |
+| bart.Table | 15.34 MB | 10.8 ns |
+| bart.Fast | 21.72 MB | 7.7 ns |
+
+19x smaller and faster, on bart's own ground. Note `Lite` below `Table`, which
+is the memory difference its existence is for.
+
+**This corpus found a bug.** Merging returned a window into the input's backing
+array rather than a copy, so a `Set` pinned every block it was built from for
+its lifetime — 8.3 MB where 0.8 was needed. The overhead scaled with the block
+count, which is to say it was worst exactly where this package is meant to be
+used, and it was invisible on the 11,226-block corpora everything had been
+measured on until now. No correctness test could have found it: every answer
+was right.
+
+[gaissmai/iprbench]: https://github.com/gaissmai/iprbench
 
 ## Reading this
 

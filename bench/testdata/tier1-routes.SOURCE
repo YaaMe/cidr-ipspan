@@ -1,0 +1,18 @@
+tier1-routes.txt.gz
+
+A full Internet routing table, ~1,062,046 prefixes with the prefix-length
+distribution a real ISP sees — 537,698 /24s in IPv4 alone.
+
+From github.com/gaissmai/iprbench (MIT, Copyright (c) 2024 gaissmai), the
+benchmark suite of bart's author. Redistributed here under that licence.
+
+It is committed for a reason the provider corpora cannot serve: those are
+fetched by fetch.sh and drift, and a licensed commercial database cannot be
+committed at all, so figures taken from either are not reproducible by a
+reader. This one is fixed and public, so the numbers derived from it can be
+checked.
+
+It is also the shape least favourable to this package. Provider allocations
+barely nest; a routing table is announcements inside announcements, which is
+what bart is built for. Measuring here rather than only on the corpora that
+flatter the design is the point of having it.
