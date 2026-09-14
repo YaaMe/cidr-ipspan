@@ -9,4 +9,6 @@ require (
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb
 )
 
+require github.com/YaaMe/cidrange-go v0.1.0
+
 replace github.com/YaaMe/cidr-ipspan => ..

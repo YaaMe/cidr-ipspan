@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/YaaMe/cidr-ipspan"
+	cidrange "github.com/YaaMe/cidrange-go"
 	"github.com/gaissmai/bart"
 	"github.com/yl2chen/cidranger"
 	"go4.org/netipx"
@@ -86,6 +87,21 @@ func buildBartFast(nets []*net.IPNet) *bart.Fast[netip.Prefix] {
 	return t
 }
 
+// cidrange is the sibling repo this package grew out of. It is measured here
+// rather than in its own module so that both structures face the same probes,
+// the same corpora and the same bart instances in one process — the separate
+// harnesses were not comparable, since they configured bart differently.
+func buildCidrange(nets []*net.IPNet) *cidrange.IPRanger {
+	r := cidrange.NewIPRanger()
+	for _, n := range nets {
+		if err := r.InsertCIDR(n); err != nil {
+			panic(err)
+		}
+	}
+	r.GenTree(0, 0) // adaptive bucket count
+	return r
+}
+
 func buildCidranger(nets []*net.IPNet) cidranger.Ranger {
 	r := cidranger.NewPCTrieRanger()
 	for _, n := range nets {
@@ -158,6 +174,7 @@ func TestAgree(t *testing.T) {
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		set, tbl := buildSet(all), buildTable(all)
 		lite, fast := buildBartLite(all), buildBartFast(all)
+		cr := buildCidrange(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
 		pfxs := prefixesOf(all)
 
@@ -185,6 +202,11 @@ func TestAgree(t *testing.T) {
 			}
 			if got := fast.Contains(addrs[i]); got != want {
 				t.Fatalf("%s: bart.Fast(%s)=%v want %v", c.Name, addrs[i], got, want)
+			}
+			// OverlapContains, not Contains: provider lists do overlap, and the
+			// cheaper entry point assumes they do not.
+			if got := cr.OverlapContains(ips[i]); got != want {
+				t.Fatalf("%s: cidrange(%s)=%v want %v", c.Name, ips[i], got, want)
 			}
 			if got, _ := cg.Contains(ips[i]); got != want {
 				t.Fatalf("%s: cidranger(%s)=%v want %v", c.Name, ips[i], got, want)
@@ -237,6 +259,7 @@ func BenchmarkBuild(b *testing.B) {
 			{"bartLite", func() any { return buildBartLite(all) }},
 			{"bartTable", func() any { return buildBart(all) }},
 			{"bartFast", func() any { return buildBartFast(all) }},
+			{"cidrange", func() any { return buildCidrange(all) }},
 			{"netipx", func() any { return buildNetipx(all) }},
 			{"cidranger", func() any { return buildCidranger(all) }},
 		} {
@@ -314,6 +337,7 @@ func TestFootprint(t *testing.T) {
 		measure("bart.Lite", func() any { return buildBartLite(all) })
 		measure("bart.Table", func() any { return buildBart(all) })
 		measure("bart.Fast", func() any { return buildBartFast(all) })
+		measure("cidrange", func() any { return buildCidrange(all) })
 		measure("cidranger", func() any { return buildCidranger(all) })
 		measure("netipx", func() any { return buildNetipx(all) })
 	}
@@ -331,6 +355,7 @@ func BenchmarkMembership(b *testing.B) {
 		all := append(append([]*net.IPNet{}, c.V4...), c.V6...)
 		set, tbl := buildSet(all), buildTable(all)
 		lite, fast := buildBartLite(all), buildBartFast(all)
+		cr := buildCidrange(all)
 		bt, cg, nx := buildBart(all), buildCidranger(all), buildNetipx(all)
 		_ = bt
 
@@ -374,6 +399,11 @@ func BenchmarkMembership(b *testing.B) {
 				b.Run(pre+"bartFast", func(b *testing.B) {
 					for i := 0; i < b.N; i++ {
 						fast.Contains(addrs[i&8191])
+					}
+				})
+				b.Run(pre+"cidrange", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						cr.OverlapContains(ips[i&8191])
 					}
 				})
 				b.Run(pre+"cidranger", func(b *testing.B) {
