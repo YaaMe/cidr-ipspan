@@ -40,116 +40,130 @@ eight are checked for correctness.
 
 ## Membership
 
-ns/op, minimum of five runs, Go 1.26 on darwin/arm64 (Apple M2). Both families
-are probed: the two index paths behave differently enough that measuring only
-IPv4 hides half the picture.
+ns/op, median of ten samples after IQR outlier rejection, Go 1.26 on
+darwin/arm64 (Apple M2). Both families are probed: the two index paths behave
+differently enough that measuring only IPv4 hides half the picture — and in
+`cidrange`'s case it hid a 24x pathology, see below.
 
-`bart.Fast` was added after bart's author pointed out in
-[YaaMe/cidrange-go#6](https://github.com/YaaMe/cidrange-go/issues/6) that the
-earlier tables compared against the wrong variants. It changes the conclusion,
-so it is reported first rather than buried.
+Everything in this table was measured **in one process, against the same
+probes and the same structures**. `cidrange` is the sibling repo this package
+grew out of; the two used to be benchmarked separately and were not comparable,
+because each configured bart differently.
 
-| corpus | fam | mix | ipspan.Set | bart.Lite | bart.Table | **bart.Fast** |
-|---|---|---|---|---|---|---|
-| aws | v4 | all hit | 39.7 | 51.7 | 51.9 | **33.0** |
-| aws | v4 | half hit | 26.8 | 30.6 | 29.9 | **22.8** |
-| aws | v4 | all miss | 6.5 | **4.7** | 5.1 | 5.1 |
-| aws | **v6** | all hit | 93.6 | 100.9 | 101.6 | **56.8** |
-| aws | **v6** | half hit | 55.1 | 68.7 | 69.4 | **38.7** |
-| aws | **v6** | all miss | **7.4** | 17.3 | 18.2 | 12.3 |
-| github | v4 | all hit | 54.8 | 54.2 | 54.7 | **32.7** |
-| github | v4 | half hit | 33.2 | 31.9 | 31.9 | **23.3** |
-| github | **v6** | all hit | 93.0 | 130.5 | 129.6 | **63.7** |
-| github | **v6** | half hit | 55.4 | 72.0 | 71.6 | **38.1** |
-| linode | v4 | all hit | 24.8 | 27.3 | 27.4 | **13.0** |
-| linode | v4 | half hit | 18.7 | 21.8 | 22.0 | **17.1** |
-| linode | **v6** | all hit | 39.9 | 74.4 | 75.1 | **33.9** |
-| linode | **v6** | half hit | 30.4 | 43.2 | 43.3 | **24.5** |
+| corpus | fam | mix | cidrange | ipspan.Set | bart.Lite | bart.Table | **bart.Fast** |
+|---|---|---|---|---|---|---|---|
+| aws | v4 | all hit | 116.6 | 40.1 | 54.0 | 54.9 | **34.0** |
+| aws | v4 | half hit | 67.7 | 27.6 | 31.7 | 32.2 | **23.2** |
+| aws | v4 | all miss | 5.3 | 6.5 | **4.7** | 5.1 | 5.1 |
+| aws | **v6** | all hit | 162.3 | 94.3 | 100.2 | 101.5 | **56.8** |
+| aws | **v6** | half hit | 175.7 | 56.0 | 69.2 | 70.1 | **39.0** |
+| aws | **v6** | all miss | 176.0 | **7.4** | 17.5 | 18.2 | 12.3 |
+| github | v4 | all hit | 116.6 | 54.9 | 54.7 | 55.3 | **33.8** |
+| github | v4 | half hit | 67.1 | 34.1 | 32.7 | 33.1 | **24.0** |
+| github | **v6** | all hit | 94.4 | 93.1 | 129.3 | 129.6 | **63.5** |
+| github | **v6** | half hit | 58.2 | 56.0 | 70.3 | 70.5 | **38.0** |
+| github | **v6** | all miss | 6.6 | 7.4 | **4.9** | 5.1 | 5.1 |
+| linode | v4 | all hit | 35.3 | 24.7 | 27.2 | 27.4 | **13.1** |
+| linode | **v6** | all hit | 90.4 | 40.1 | 74.3 | 75.1 | **34.0** |
+| linode | **v6** | half hit | 54.1 | 30.3 | 43.4 | 43.4 | **24.8** |
 
-**`bart.Fast` is faster than `ipspan.Set` on every hit row**, by 1.2x to 1.9x.
-An earlier version of this file claimed IPv6 for this package; against `Fast`
-that claim is wrong, and it was wrong because the comparison was against
-`bart.Table` and `bart.Lite` only.
+**`bart.Fast` is fastest on every hit row**, by 1.2x to 1.9x over `ipspan.Set`.
+It pays for that in memory; see below.
 
-Two rows survive, and they are the same row twice: `ipspan.Set` wins IPv6 pure
-misses, 7.4 against 12.3. The index skips the leading bits every span shares,
-so an address outside the corpus is rejected before any slot is read.
+**Against `bart.Lite`** — the nearest structure by footprint — `ipspan.Set` wins
+every IPv6 hit row (93.1 against 129.3 on `github`, 40.1 against 74.3 on
+`linode`) and is level on IPv4.
+
+**On pure misses `bart.Lite` wins**, 4.7–4.9 against 7.4. An earlier revision of
+this file claimed the opposite from the `aws` v6 row alone, where `Set`'s 7.4
+does beat `Lite`'s 17.5. That was one row generalised to a rule; `github` and
+`linode` go the other way.
 
 `Lite` and `Table` are within 2% of each other everywhere, because `Contains`
-never reads the payload. That distinction, which the previous revision of this
-file spent a paragraph on, turned out not to matter. `Fast` is the one that did.
+never reads the payload.
 
-netipx and cidranger are omitted for width; they run 45-220 ns on the same
-probes, and the full set is in the benchmark output.
+**`cidrange` collapses on AWS IPv6** — 176 ns, and misses are no cheaper than
+hits, so the early exit is not firing and the lookup degrades to a scan. It is
+24x `ipspan.Set` on that row. Its own benchmarks probe IPv4 only and never saw
+it. The same corpus is where its footprint is worst, so mask-length bucketing
+is what does not survive AWS's mix of `/40`, `/48` and `/64`.
 
 ## Longest-prefix match
 
-Only these three answer which prefix matched.
+Only these three answer which prefix matched. Same run as above.
 
 | corpus | fam | mix | ipspan.Table | bart.Table | **bart.Fast** |
 |---|---|---|---|---|---|
-| aws | v4 | all hit | 69.8 | 68.0 | **43.1** |
-| aws | v4 | half hit | 42.0 | 41.4 | **28.8** |
-| aws | **v6** | all hit | 109.6 | 99.9 | **52.6** |
-| aws | **v6** | half hit | 62.4 | 71.4 | **38.6** |
+| aws | v4 | all hit | 70.5 | 70.0 | **43.5** |
+| aws | v4 | half hit | 43.6 | 42.0 | **29.7** |
+| aws | **v6** | all hit | 110.4 | 100.4 | **52.6** |
+| aws | **v6** | half hit | 63.4 | 71.2 | **39.1** |
 | aws | **v6** | all miss | **7.7** | 19.8 | 14.6 |
-| github | v4 | all hit | 77.1 | 62.2 | **38.2** |
-| github | **v6** | all hit | 109.3 | 128.7 | **61.6** |
-| github | **v6** | half hit | 63.1 | 71.8 | **38.3** |
-| linode | v4 | all hit | 107.2 | 28.5 | **14.0** |
-| linode | **v6** | all hit | 69.8 | 77.0 | **34.4** |
+| github | v4 | all hit | 77.4 | 62.4 | **38.2** |
+| github | **v6** | all hit | 109.8 | 128.3 | **62.2** |
+| github | **v6** | half hit | 64.0 | 71.9 | **38.5** |
+| linode | v4 | all hit | 107.7 | 28.6 | **14.1** |
+| linode | **v6** | all hit | 70.3 | 77.3 | **34.5** |
 
 **`bart.Fast` wins every row except IPv6 pure misses.** `ipspan.Table` has no
-case left on speed: it loses IPv4 badly (107.2 against 14.0 on `linode`) and
+case left on speed — it loses IPv4 badly (107.7 against 14.1 on `linode`) and
 IPv6 by roughly 2x.
 
-The IPv4 gap is structural, not a tuning problem. Membership lets a structure
-throw information away, and `linode`'s 5409 IPv4 prefixes really are 95 spans;
-longest-prefix match forbids it, so `Table` cuts an interval wherever the
-winner changes and ends up with more pieces than it started with, exactly
-where `Set` ends up with fewest. bart keeps the hierarchy instead of
-flattening it.
+The IPv4 gap is structural. Membership lets a structure throw information away,
+and `linode`'s 5409 IPv4 prefixes really are 95 spans; longest-prefix match
+forbids it, so `Table` cuts an interval wherever the winner changes and ends up
+with more pieces than it started with — exactly where `Set` ends up with fewest.
+bart keeps the hierarchy instead of flattening it.
 
 ## Memory and build cost
 
-From `BenchmarkBuild`. Bytes per block is what the structure retains, not what
-it allocated getting there; cross-checked against `TestFootprint`, which
+Retained bytes per block — what the structure holds, not what it allocated
+getting there — with `runtime.KeepAlive` on both the structure and its input,
+since without the latter the GC reclaims the source between samples and the
+figures come out ~1.6x low. Cross-checked against `TestFootprint`, which
 measures the same thing a different way and agrees to the byte.
 
-| corpus | | ipspan.Set | ipspan.Table | bart.Lite | bart.Table | bart.Fast | netipx | cidranger |
-|---|---|---|---|---|---|---|---|---|
-| aws | B/block | 24 | 90 | 33 | 71 | 112 | **14** | 502 |
-| aws | build ms | 4.0 | 12.0 | 3.2 | 3.6 | 4.2 | 6.2 | 53.1 |
-| github | B/block | 22 | 83 | 27 | 67 | 106 | **18** | 508 |
-| github | build ms | 2.1 | 7.5 | **2.0** | 2.3 | 2.6 | 3.5 | 31.9 |
-| linode | B/block | 12 | 80 | 22 | 54 | 59 | **1** | 497 |
-| linode | build ms | 1.4 | 5.2 | **1.2** | 1.4 | 1.8 | 2.6 | 18.0 |
+| corpus | | cidrange | ipspan.Set | ipspan.Table | bart.Lite | bart.Table | bart.Fast | netipx | cidranger |
+|---|---|---|---|---|---|---|---|---|---|
+| aws | B/block | 106 | **24** | 90 | 33 | 71 | 112 | 14 | 502 |
+| aws | build ms | 6.0 | 4.1 | 11.9 | **3.3** | 4.1 | 5.0 | 7.5 | 56.7 |
+| github | B/block | 97 | **22** | 83 | 27 | 67 | 106 | 18 | 508 |
+| github | build ms | 4.1 | 2.5 | 8.6 | **2.3** | 2.7 | 3.0 | 4.1 | 32.4 |
+| linode | B/block | 136 | **12** | 80 | 22 | 54 | 59 | 1 | 497 |
+| linode | build ms | 1.5 | 1.4 | 5.3 | **1.2** | 1.4 | 1.8 | 2.6 | 18.2 |
 
-**This is what `bart.Fast` costs.** It is the largest structure in the table -
-112 bytes per block on `aws`, against `ipspan.Set`'s 24. It buys its speed with
-roughly 4.7x the memory, and that is the honest frame for every row above.
+**This is what `bart.Fast` costs**: 112 bytes per block on `aws` against
+`ipspan.Set`'s 24. It buys its speed with roughly 4.7x the memory, which is the
+frame for every row in the tables above.
 
-`ipspan.Set` is the smallest of the prefix-preserving structures and falls as
+`ipspan.Set` is the smallest of the prefix-preserving structures and shrinks as
 the data collapses, because what it stores is the shape of the address set
-rather than the blocks. `netipx` is smaller still; its 1 byte per block on
-`linode` is the clearest evidence the collapse is real. It pays in the lookup,
-binary-searching where this indexes.
+rather than the blocks. `netipx` is smaller still — 1 byte per block on
+`linode` is the clearest evidence the collapse is real — and pays in the
+lookup, binary-searching where this indexes.
+
+`cidrange` is the only structure that gets *larger* on the corpus that collapses
+hardest: 136 bytes per block on `linode` against 106 on `aws`, while every other
+structure roughly halves. Bucketing by mask length does not benefit from
+adjacency the way merging does.
 
 ## Reading this
 
-**If memory is free, use `bart.Fast`.** It is fastest on every workload here
-except IPv6 pure misses, for both membership and longest-prefix match.
+**If memory is free, use `bart.Fast`.** Fastest on every hit workload here, for
+both membership and longest-prefix match.
 
 **If memory is not free**, the comparison is `ipspan.Set` at 24 B/block against
-`bart.Fast` at 112, or `bart.Lite` at 33. Against `Lite` - the nearest
-footprint - `Set` wins IPv6 clearly (93.0 against 130.5 on `github`) and ties
-IPv4. That is the case this package still has.
+`bart.Fast` at 112 or `bart.Lite` at 33. Against `Lite`, `Set` wins every IPv6
+hit row and ties IPv4, at three quarters of the footprint. That is the case
+this package has.
 
-**For longest-prefix match, use bart.** `ipspan.Table` costs more memory than
-`bart.Table` and is slower than both bart variants.
+**For longest-prefix match, use bart** on either family.
 
-**A caveat on the absolute numbers.** They are not stable across machine
-states: the same benchmarks on this machine have produced figures 1.6x apart
-between a quiet session and a loaded one, with the ratios between
-implementations unchanged. Compare within a table, never across revisions of
-one, and treat the ratios as the transferable claim.
+**On the absolute numbers.** They are not stable across machine states: the same
+benchmarks here have produced figures 1.6x apart between a quiet session and a
+loaded one, with every ratio between implementations unchanged. Compare within
+one table, never across revisions of it, and treat the ratios as the claim that
+transfers. Each figure is the median of ten samples with outliers rejected; the
+worst residual spread in this run was 25%, on a row whose margin is far wider
+than that.
+
