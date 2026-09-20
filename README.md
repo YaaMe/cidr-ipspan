@@ -67,7 +67,13 @@ A `Set` forgets the prefixes. A `Table` remembers which one matched. Same
 ```go
 set, err := b.BuildSet()     // Contains(addr) bool
 tbl, err := b.BuildTable()   // Lookup(addr) (netip.Prefix, bool)
+                             // Contains(addr) bool, as a Set answers it
 ```
+
+`Table.Contains` agrees with `Set.Contains` on the same `Builder`, always.
+`Lookup` is the narrower question and can differ: `AddRange` covers addresses
+without naming a prefix, so a range-only address is in `Contains` and absent
+from `Lookup`. Ask `Contains` when the question is membership.
 
 `Table` does not scan the prefixes covering an address. Since the set is fixed
 once built, the answer is precomputed: prefix boundaries cut the address space
@@ -96,7 +102,8 @@ measured on the same toolchain.
 **Returning the prefix is free.** `Lookup` costs what `Table.Contains` costs —
 20.3 against 20.7 — because the winner is one more array read, not a search.
 Once you are paying for a `Table`, there is no reason to ask the weaker
-question.
+question — unless the corpus has `AddRange` in it, where membership is not the
+weaker question but a different one.
 
 What a `Table` costs is intervals. Merging for membership joins everything
 touching; a `Table` must also cut wherever the winner changes, so 100000

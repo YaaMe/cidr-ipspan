@@ -34,10 +34,27 @@ type Table struct {
 	pfx   []netip.Prefix
 }
 
-// Contains reports whether addr is covered by any prefix.
+// Contains reports whether addr is covered by anything the Builder was given,
+// including an AddRange, which has no prefix to report.
+//
+// It therefore agrees with Set.Contains on the same input, which is the point
+// of the two being built from one Builder. It cannot be derived from Lookup:
+// an address covered only by a range has no prefix to return, so Lookup says
+// false where this says true.
 func (t *Table) Contains(addr netip.Addr) bool {
-	_, ok := t.Lookup(addr)
-	return ok
+	if t == nil {
+		return false
+	}
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+	if addr.Is4() {
+		return t.v4.contains(beUint32(addr.As4()))
+	}
+	if !addr.IsValid() {
+		return false
+	}
+	return t.v6.contains(u128FromBytes(addr.As16()))
 }
 
 // Lookup returns the longest prefix containing addr.
@@ -45,6 +62,9 @@ func (t *Table) Contains(addr netip.Addr) bool {
 // Longest is the meaningful answer when prefixes nest, which published lists do
 // constantly: asked about an address inside both a /16 and a /24, a caller
 // wants the /24.
+//
+// An address covered only by an AddRange has no prefix, so this reports false
+// for it while Contains reports true. Use Contains for membership.
 func (t *Table) Lookup(addr netip.Addr) (netip.Prefix, bool) {
 	if t == nil {
 		return netip.Prefix{}, false
