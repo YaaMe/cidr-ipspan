@@ -67,7 +67,13 @@ A `Set` forgets the prefixes. A `Table` remembers which one matched. Same
 ```go
 set, err := b.BuildSet()     // Contains(addr) bool
 tbl, err := b.BuildTable()   // Lookup(addr) (netip.Prefix, bool)
+                             // Contains(addr) bool, as a Set answers it
 ```
+
+`Table.Contains` agrees with `Set.Contains` on the same `Builder`, always.
+`Lookup` is the narrower question and can differ: `AddRange` covers addresses
+without naming a prefix, so a range-only address is in `Contains` and absent
+from `Lookup`. Ask `Contains` when the question is membership.
 
 `Table` does not scan the prefixes covering an address. Since the set is fixed
 once built, the answer is precomputed: prefix boundaries cut the address space
@@ -75,17 +81,20 @@ into elementary intervals, and inside one of those the longest match never
 changes, so each interval stores its winner. Longest-prefix matching becomes
 the same indexed read membership is.
 
-ns/op, 8192 rotating addresses, **Go 1.26** on darwin/arm64 (Apple M2),
-minimum of three runs:
+ns/op, 8192 rotating addresses, **Go 1.26** on darwin/arm64 (Apple M2). Median
+of 40 samples per case — two independent runs of 20, outliers rejected by IQR:
 
 | blocks | mix | Set | Table.Contains | Table.Lookup |
 |---|---|---|---|---|
-| 1e3 | all hit | 5.6 | 6.5 | 6.8 |
-| 1e3 | half hit | 8.1 | 9.2 | 9.3 |
-| 1e3 | all miss | 3.7 | 3.9 | 4.3 |
-| 1e5 | all hit | 4.4 | 20.7 | 20.3 |
-| 1e5 | half hit | 8.1 | 14.4 | 13.9 |
-| 1e5 | all miss | 3.7 | 3.9 | 4.3 |
+| 1e3 | all hit | 5.7 | 5.7 | 6.9 |
+| 1e3 | half hit | 8.6 | 8.8 | 9.5 |
+| 1e3 | all miss | 3.7 | 3.7 | 4.3 |
+| 1e5 | all hit | 4.4 | 19.0 | 20.8 |
+| 1e5 | half hit | 8.1 | 15.5 | 16.3 |
+| 1e5 | all miss | 3.7 | 3.7 | 4.3 |
+
+The two runs agree within 2.2% on every cell, and the widest spread inside a
+case is 11%. Compare within this table only.
 
 The Go version matters more than it looks. The same benchmarks on Go 1.22 run
 13–33% slower — 4.4 becomes 5.8 on the 1e5 hit — and none of that is the
@@ -93,15 +102,20 @@ Swiss-table map from Go 1.24, since nothing here uses a map. It is general
 code generation. Numbers from this package are only comparable to others
 measured on the same toolchain.
 
-**Returning the prefix is free.** `Lookup` costs what `Table.Contains` costs —
-20.3 against 20.7 — because the winner is one more array read, not a search.
-Once you are paying for a `Table`, there is no reason to ask the weaker
-question.
+**Returning the prefix is nearly free.** `Table.Contains` stops as soon as it
+knows an interval covers the address; `Lookup` also reads that interval's
+winner and rebuilds the prefix, which costs 20.8 against 19.0 on the 1e5 hit.
+Both are an indexed read rather than a search: what separates them is one more
+array read and building the prefix, never a second pass over the data. Across
+the table that is 5% to 21%, widest where the work itself is smallest.
+
+Ask `Contains` when membership is the question. It is slightly cheaper, and it
+is the only one of the two that answers for `AddRange`.
 
 What a `Table` costs is intervals. Merging for membership joins everything
 touching; a `Table` must also cut wherever the winner changes, so 100000
 nested blocks give a `Set` 523 spans and a `Table` 183066 intervals. That is
-where the 4.4 against 20.7 comes from, and the memory:
+where the 4.4 against 19.0 comes from, and the memory:
 
 | blocks | Set | Table |
 |---|---|---|
